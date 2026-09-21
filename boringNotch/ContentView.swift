@@ -245,10 +245,21 @@ struct ContentView: View {
     @ViewBuilder
     func NotchLayout() -> some View {
         let headerHeight = max(24, vm.effectiveClosedNotchHeight)
-        let openContentHeight = max(0, vm.notchSize.height - headerHeight)
+        // The open content sits below the header's normal stack spacing and
+        // above the insets applied to the whole expanded notch below. Keep
+        // those values in the slot calculation so the black background does
+        // not grow past the notch frame on either notched or non-notched Macs.
+        let openContentHeight = max(
+            0,
+            vm.notchSize.height
+                - headerHeight
+                - 8 // VStack spacing between header and the selected tab.
+                - 12 // Expanded-notch bottom inset.
+                - (vm.effectiveClosedNotchHeight == 0 ? 10 : 0) // Non-notched bottom spacer.
+        )
 
-        VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading) {
+            VStack(alignment: .leading) {
                 if coordinator.helloAnimationRunning {
                     Spacer()
                     HelloAnimation(onFinish: {
@@ -346,7 +357,7 @@ struct ContentView: View {
               }
               .zIndex(2)
             if vm.notchState == .open {
-                VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading) {
                     switch coordinator.currentView {
                     case .home:
                         NotchHomeView(albumArtNamespace: albumArtNamespace)
@@ -354,14 +365,10 @@ struct ContentView: View {
                         ShelfView()
                     case .nothingEar:
                         NothingEarView()
+                            .frame(height: openContentHeight, alignment: .top)
+                            .frame(maxWidth: .infinity, alignment: .top)
                     }
                 }
-                // Every tab gets the exact same slot. Letting the selected
-                // view decide its own height makes SwiftUI re-place the
-                // expanded notch when the Ear panel changes state.
-                .frame(height: openContentHeight, alignment: .top)
-                .frame(maxWidth: .infinity, alignment: .top)
-                .clipped()
                 .transition(
                     .scale(scale: 0.8, anchor: .top)
                     .combined(with: .opacity)
