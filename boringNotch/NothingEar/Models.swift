@@ -120,7 +120,14 @@ enum NoiseControlMode: Equatable, Codable, Sendable {
         switch self {
         case .off: "Off"
         case .transparency: "Transparency"
-        case let .noiseCancellation(level): "ANC " + String(level)
+        case let .noiseCancellation(level):
+            switch level {
+            case 1: "ANC Low"
+            case 2: "ANC Mid"
+            case 3: "ANC High"
+            case 4: "ANC Adaptive"
+            default: "ANC"
+            }
         case let .unknown(rawValue): "Mode " + String(rawValue)
         }
     }
@@ -132,6 +139,16 @@ enum NoiseControlMode: Equatable, Codable, Sendable {
         case .noiseCancellation: "ANC"
         case .unknown: "Noise control"
         }
+    }
+
+    /// Nothing's ANC payload has four active strengths. Keep the level in the
+    /// app model human-readable so the mode rail can show what the earbuds
+    /// actually reported, instead of only saying “ANC”.
+    var selectedANCMode: Self {
+        if case .noiseCancellation = self {
+            return self
+        }
+        return .noiseCancellation(level: 4)
     }
 }
 

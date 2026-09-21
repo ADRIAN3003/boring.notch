@@ -122,14 +122,14 @@ struct NothingEarSettingsView: View {
                             Button("Transparency") { deviceManager.setNoiseControl(.transparency) }
                         }
                         if deviceManager.state.capabilities.supportsANCStrength {
-                            ForEach(1...6, id: \.self) { level in
-                                Button("ANC (\(level))") {
+                            ForEach(1...4, id: \.self) { level in
+                                Button(NoiseControlMode.noiseCancellation(level: level).title) {
                                     deviceManager.setNoiseControl(.noiseCancellation(level: level))
                                 }
                             }
                         } else {
                             Button("Noise cancellation") {
-                                deviceManager.setNoiseControl(.noiseCancellation(level: 1))
+                                deviceManager.setNoiseControl(deviceManager.state.noiseControl.selectedANCMode)
                             }
                         }
                     }

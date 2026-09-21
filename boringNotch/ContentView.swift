@@ -244,8 +244,11 @@ struct ContentView: View {
 
     @ViewBuilder
     func NotchLayout() -> some View {
-        VStack(alignment: .leading) {
-            VStack(alignment: .leading) {
+        let headerHeight = max(24, vm.effectiveClosedNotchHeight)
+        let openContentHeight = max(0, vm.notchSize.height - headerHeight)
+
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
                 if coordinator.helloAnimationRunning {
                     Spacer()
                     HelloAnimation(onFinish: {
@@ -294,7 +297,7 @@ struct ContentView: View {
                           BoringFaceAnimation()
                        } else if vm.notchState == .open {
                            BoringHeader()
-                               .frame(height: max(24, vm.effectiveClosedNotchHeight))
+                               .frame(height: headerHeight)
                                .opacity(gestureProgress != 0 ? 1.0 - min(abs(gestureProgress) * 0.1, 0.3) : 1.0)
                        } else {
                            Rectangle().fill(.clear).frame(width: vm.closedNotchSize.width - 20, height: vm.effectiveClosedNotchHeight)
@@ -353,7 +356,12 @@ struct ContentView: View {
                         NothingEarView()
                     }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                // Every tab gets the exact same slot. Letting the selected
+                // view decide its own height makes SwiftUI re-place the
+                // expanded notch when the Ear panel changes state.
+                .frame(height: openContentHeight, alignment: .top)
+                .frame(maxWidth: .infinity, alignment: .top)
+                .clipped()
                 .transition(
                     .scale(scale: 0.8, anchor: .top)
                     .combined(with: .opacity)

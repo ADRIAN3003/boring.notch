@@ -305,31 +305,38 @@ enum NothingProtocol {
 
     static func noiseControl(for rawValue: UInt8) -> NoiseControlMode {
         switch rawValue {
-        case 0: .off
-        case 6: .transparency
-        case 5: .noiseCancellation(level: 1)
-        case 7: .noiseCancellation(level: 2)
-        case 3: .noiseCancellation(level: 3)
-        case 1: .noiseCancellation(level: 4)
-        case 2: .noiseCancellation(level: 5)
-        case 4: .noiseCancellation(level: 6)
+        // Ear Web and SwiftNothingEar both use these bytes for the ANC
+        // command family.  0x05/0x07 are Off/Transparency; 0x01...0x04
+        // are High/Mid/Low/Adaptive.  The previous implementation used the
+        // listening-mode values here, so tapping Off or Ambient sent bytes
+        // that Nothing Ear (a) simply ignored, and tapping ANC sent 0x05
+        // (Off).
+        case 0x05: .off
+        case 0x07: .transparency
+        case 0x03: .noiseCancellation(level: 1) // Low
+        case 0x02: .noiseCancellation(level: 2) // Mid
+        case 0x01: .noiseCancellation(level: 3) // High
+        case 0x04: .noiseCancellation(level: 4) // Adaptive
         default: .unknown(rawValue: Int(rawValue))
         }
     }
 
     static func commandForNoiseControl(_ mode: NoiseControlMode, codec: inout NothingFrameCodec) throws -> Data {
+        let rawValue: UInt8
         switch mode {
-        case .transparency:
-            return try codec.makeFrame(command: .setNoiseControl, payload: [0x01, 0x06, 0x00])
-        case .off:
-            return try codec.makeFrame(command: .setNoiseControl, payload: [0x01, 0x00, 0x00])
+        case .off: rawValue = 0x05
+        case .transparency: rawValue = 0x07
         case let .noiseCancellation(level):
-            let values: [UInt8] = [5, 7, 3, 1, 2, 4]
-            let index = min(max(level, 1), values.count) - 1
-            return try codec.makeFrame(command: .setNoiseControl, payload: [0x01, values[index], 0x00])
-        case let .unknown(rawValue):
-            return try codec.makeFrame(command: .setNoiseControl, payload: [0x01, UInt8(clamping: rawValue), 0x00])
+            rawValue = switch level {
+            case 1: 0x03 // Low
+            case 2: 0x02 // Mid
+            case 3: 0x01 // High
+            case 4: 0x04 // Adaptive
+            default: 0x04
+            }
+        case let .unknown(value): rawValue = UInt8(clamping: value)
         }
+        return try codec.makeFrame(command: .setNoiseControl, payload: [0x01, rawValue, 0x00])
     }
 
     static func commandForListeningMode(_ mode: NoiseControlMode, codec: inout NothingFrameCodec) throws -> Data {
@@ -518,4 +525,3 @@ enum NothingProtocol {
         }
     }
 }
-

@@ -149,16 +149,25 @@ final class DeviceManager: ObservableObject {
 
     func setNoiseControl(_ mode: NoiseControlMode) {
         guard state.isConnected else { return }
-        state.noiseControl = mode
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                let usesListeningMode = state.descriptor?.name.lowercased().contains("headphone") == true
-                let frame = usesListeningMode
-                    ? try NothingProtocol.commandForListeningMode(mode, codec: &protocolCodec)
-                    : try NothingProtocol.commandForNoiseControl(mode, codec: &protocolCodec)
+                // SwiftNothingEar uses the ANC command family for earbuds
+                // and headphones alike. The old name-based listening-mode
+                // branch made the command selection depend on a label rather
+                // than the device protocol, so keep this path authoritative.
+                let frame = try NothingProtocol.commandForNoiseControl(mode, codec: &protocolCodec)
                 try transport.write(frame)
                 publishEvent(.init(kind: .noiseControl, title: mode.title))
+
+                // The UI is driven by the response/notification from the
+                // device, not by an optimistic local assignment. Read back
+                // once after the write so earbuds that do not emit a
+                // notification still converge to their actual mode.
+                try? await Task.sleep(nanoseconds: 180_000_000)
+                guard state.isConnected else { return }
+                let readFrame = try protocolCodec.makeFrame(command: .readNoiseControl)
+                try transport.write(readFrame)
             } catch {
                 lastError = error.localizedDescription
             }
@@ -284,8 +293,20 @@ final class DeviceManager: ObservableObject {
                 if adapterState == .poweredOff || adapterState == .unauthorized || adapterState == .unsupported {
                     if state.isConnected { transport.disconnect() }
                     state.connection = .disconnected
-                } else if adapterState == .poweredOn, state.connection == .disconnected {
-                    autoReconnectKnownDevice()
+                } else if adapterState == .poweredOn {
+                    // CoreBluetooth is often still `.unknown` when the app
+                    // starts. A first connection attempt can therefore fail
+                    // before the adapter announces `.poweredOn`; retrying
+                    // only from the timer left the saved earbuds stranded in
+                    // a reconnecting state.
+                    refreshDiscovery()
+                    if state.connection != .connected && state.connection != .connecting {
+                        retryTask?.cancel()
+                        retryTask = nil
+                        retryAttempt = 0
+                        connectToDiscoveredKnownDeviceIfNeeded()
+                        autoReconnectKnownDevice()
+                    }
                 }
             }
         }
@@ -320,8 +341,8 @@ final class DeviceManager: ObservableObject {
     }
 
     private func autoReconnectKnownDevice() {
-        guard !isUserDisconnect, state.connection != .connected, state.connection != .connecting, state.connection != .reconnecting else { return }
-        guard let candidate = repository.knownDevices.first else { return }
+        guard !isUserDisconnect, state.connection != .connected, state.connection != .connecting else { return }
+        guard let candidate = repository.knownDevices.first(where: { automaticTarget(for: $0) != nil }) else { return }
         guard let target = automaticTarget(for: candidate) else { return }
         connectAutomatically(to: target)
     }
@@ -330,14 +351,15 @@ final class DeviceManager: ObservableObject {
         guard !isUserDisconnect,
               state.connection != .connected,
               state.connection != .connecting,
-              let candidate = repository.knownDevices.first,
-              let discovered = discoveredDevices.first(where: { $0.representsSamePhysicalDevice(as: candidate) })
+              let match = repository.knownDevices.compactMap({ candidate in
+                  discoveredDevices.first(where: { $0.representsSamePhysicalDevice(as: candidate) })
+              }).first
         else { return }
 
         retryTask?.cancel()
         retryTask = nil
         retryAttempt = 0
-        connectAutomatically(to: discovered)
+        connectAutomatically(to: match)
     }
 
     private func automaticTarget(for candidate: BluetoothDeviceRecord) -> BluetoothDeviceRecord? {
