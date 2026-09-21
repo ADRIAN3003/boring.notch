@@ -33,9 +33,11 @@ final class DeviceManager: ObservableObject {
     @Published private(set) var lastEvent: DeviceEvent?
 
     let repository: DeviceRepository
-    let bluetoothState: BluetoothStateMonitor
+    private let providedTransport: BluetoothTransport?
+    private let providedBluetoothState: BluetoothStateMonitor?
 
-    private let transport: BluetoothTransport
+    private lazy var transport: BluetoothTransport = providedTransport ?? CoreBluetoothNothingTransport()
+    private lazy var bluetoothState: BluetoothStateMonitor = providedBluetoothState ?? BluetoothStateMonitor()
     private var protocolCodec = NothingFrameCodec()
     private var decoder = NothingFrameCodec()
     private var eventTask: Task<Void, Never>?
@@ -51,9 +53,9 @@ final class DeviceManager: ObservableObject {
         repository: DeviceRepository? = nil,
         bluetoothState: BluetoothStateMonitor? = nil
     ) {
-        self.transport = transport ?? CoreBluetoothNothingTransport()
+        self.providedTransport = transport
         self.repository = repository ?? DeviceRepository()
-        self.bluetoothState = bluetoothState ?? BluetoothStateMonitor()
+        self.providedBluetoothState = bluetoothState
     }
 
     deinit {
@@ -73,6 +75,24 @@ final class DeviceManager: ObservableObject {
         refreshDiscovery()
         startPolling()
         autoReconnectKnownDevice()
+    }
+
+    func stop() {
+        guard isStarted else { return }
+        eventTask?.cancel()
+        adapterTask?.cancel()
+        pollingTask?.cancel()
+        retryTask?.cancel()
+        eventTask = nil
+        adapterTask = nil
+        pollingTask = nil
+        retryTask = nil
+        transport.disconnect()
+        isStarted = false
+        isUserDisconnect = true
+        retryAttempt = 0
+        state = .empty
+        discoveredDevices = []
     }
 
     func refreshDiscovery() {
@@ -301,10 +321,28 @@ final class DeviceManager: ObservableObject {
 
     private func autoReconnectKnownDevice() {
         guard !isUserDisconnect, state.connection != .connected, state.connection != .connecting, state.connection != .reconnecting else { return }
-        let known = repository.knownDevices
-        guard let candidate = known.first else { return }
-        let discovered = discoveredDevices.first(where: { $0.representsSamePhysicalDevice(as: candidate) }) ?? candidate
+        guard let candidate = repository.knownDevices.first else { return }
+        guard let target = automaticTarget(for: candidate) else { return }
+        connectAutomatically(to: target)
+    }
+
+    private func connectToDiscoveredKnownDeviceIfNeeded() {
+        guard !isUserDisconnect,
+              state.connection != .connected,
+              state.connection != .connecting,
+              let candidate = repository.knownDevices.first,
+              let discovered = discoveredDevices.first(where: { $0.representsSamePhysicalDevice(as: candidate) })
+        else { return }
+
+        retryTask?.cancel()
+        retryTask = nil
+        retryAttempt = 0
         connectAutomatically(to: discovered)
+    }
+
+    private func automaticTarget(for candidate: BluetoothDeviceRecord) -> BluetoothDeviceRecord? {
+        discoveredDevices.first(where: { $0.representsSamePhysicalDevice(as: candidate) })
+            ?? (candidate.isCoreBluetoothIdentifier ? candidate : nil)
     }
 
     private func connectAutomatically(to device: BluetoothDeviceRecord) {
@@ -380,7 +418,12 @@ final class DeviceManager: ObservableObject {
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             guard let self, !Task.isCancelled, !isUserDisconnect else { return }
             refreshDiscovery()
-            connectAutomatically(to: device)
+            if let target = automaticTarget(for: device) {
+                connectAutomatically(to: target)
+            } else {
+                state.connection = .disconnected
+                autoReconnectKnownDevice()
+            }
         }
     }
 
@@ -414,6 +457,7 @@ final class DeviceManager: ObservableObject {
                     $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
                 }
             }
+            connectToDiscoveredKnownDeviceIfNeeded()
         case let .bytes(data):
             let frames = decoder.append(data)
             frames.compactMap(NothingProtocol.event(from:)).forEach(apply)

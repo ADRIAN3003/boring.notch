@@ -14,6 +14,7 @@ enum OnboardingStep {
     case calendarPermission
     case remindersPermission
     case accessibilityPermission
+    case bluetoothPermission
     case musicPermission
     case finished
 }
@@ -111,6 +112,29 @@ struct OnboardingView: View {
                     onAllow: {
                         Task {
                             await requestAccessibilityPermission()
+                            withAnimation(.easeInOut(duration: 0.6)) {
+                                step = .bluetoothPermission
+                            }
+                        }
+                    },
+                    onSkip: {
+                        withAnimation(.easeInOut(duration: 0.6)) {
+                            step = .bluetoothPermission
+                        }
+                    }
+                )
+                .transition(.opacity)
+
+            case .bluetoothPermission:
+                PermissionRequestView(
+                    icon: Image(systemName: "bluetooth"),
+                    title: "Enable Bluetooth Access",
+                    description: "Boring Notch can connect to Nothing and CMF earbuds, show their battery levels, and give you quick access to noise control, EQ, and other device features from the notch.",
+                    privacyNote: "Bluetooth is used only for local device discovery and control. Nothing is sent to a server.",
+                    onAllow: {
+                        Task { @MainActor in
+                            DeviceManager.shared.start()
+                            try? await Task.sleep(for: .milliseconds(350))
                             withAnimation(.easeInOut(duration: 0.6)) {
                                 step = .musicPermission
                             }

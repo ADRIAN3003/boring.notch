@@ -281,10 +281,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
 
-        Task { @MainActor in
-            DeviceManager.shared.start()
-        }
-
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(screenConfigurationDidChange),
@@ -431,12 +427,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self.showOnboardingWindow()
             }
             playWelcomeSound()
+            // Bluetooth is intentionally started by the onboarding permission
+            // step so the system prompt appears in the startup flow.
+            DeviceManager.shared.stop()
         } else if MusicManager.shared.isNowPlayingDeprecated
             && Defaults[.mediaController] == .nowPlaying
         {
             DispatchQueue.main.async {
                 self.showOnboardingWindow(step: .musicPermission)
             }
+            DeviceManager.shared.start()
+        } else {
+            DeviceManager.shared.start()
         }
 
         previousScreens = NSScreen.screens

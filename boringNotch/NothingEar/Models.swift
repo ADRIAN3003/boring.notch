@@ -326,12 +326,11 @@ struct BluetoothDeviceRecord: Identifiable, Equatable, Codable, Sendable {
         if address.caseInsensitiveCompare(other.address) == .orderedSame { return true }
         guard !normalizedName.isEmpty, normalizedName == other.normalizedName else { return false }
 
-        // Keep same-name CoreBluetooth peripherals separate only when they
-        // are genuinely distinct native identities. A legacy MAC address and
-        // a CoreBluetooth UUID are the migration alias that caused the
-        // duplicate Ear (a) rows.
-        return isCoreBluetoothIdentifier != other.isCoreBluetoothIdentifier
-            || !isCoreBluetoothIdentifier && !other.isCoreBluetoothIdentifier
+        // CoreBluetooth can expose one paired device through more than one
+        // native identity while its advertisement/connection state settles.
+        // The model name is the stable identity we can rely on, so same-name
+        // records must collapse to one row.
+        return true
     }
 }
 
@@ -393,4 +392,3 @@ struct DeviceState: Equatable, Codable, Sendable {
     var capabilities: DeviceCapabilities { descriptor?.capabilities ?? .unknown }
     var isConnected: Bool { connection == .connected }
 }
-
