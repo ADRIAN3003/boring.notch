@@ -8,6 +8,7 @@ import SwiftUI
 /// control popovers, while the controls people use most stay one click away.
 @MainActor
 struct NothingEarView: View {
+    @EnvironmentObject private var vm: BoringViewModel
     @ObservedObject private var deviceManager = DeviceManager.shared
     @State private var showingEqualizer = false
     @State private var showingAdvancedControls = false
@@ -30,6 +31,16 @@ struct NothingEarView: View {
         .clipped()
         .onAppear {
             deviceManager.start()
+            updatePopoverActivity()
+        }
+        .onDisappear {
+            vm.isEarPopoverActive = false
+        }
+        .onChange(of: showingEqualizer) { _, _ in
+            updatePopoverActivity()
+        }
+        .onChange(of: showingAdvancedControls) { _, _ in
+            updatePopoverActivity()
         }
         .onChange(of: deviceManager.state.isConnected) { _, connected in
             if !connected {
@@ -304,6 +315,10 @@ struct NothingEarView: View {
         case 4: "ANC · Adaptive"
         default: "ANC"
         }
+    }
+
+    private func updatePopoverActivity() {
+        vm.isEarPopoverActive = showingEqualizer || showingAdvancedControls
     }
 }
 
