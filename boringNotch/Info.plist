@@ -7,6 +7,10 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Boring Notch uses Bluetooth to control paired Nothing and CMF earbuds and read their battery status.</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>Boring Notch uses Bluetooth to communicate with paired Nothing and CMF earbuds.</string>
 	<key>SUEnableDownloaderService</key>
 	<true/>
 	<key>SUEnableInstallerLauncherService</key>

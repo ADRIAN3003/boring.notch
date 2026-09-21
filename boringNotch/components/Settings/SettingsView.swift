@@ -45,6 +45,9 @@ struct SettingsView: View {
                 NavigationLink(value: "Battery") {
                     Label("Battery", systemImage: "battery.100.bolt")
                 }
+                NavigationLink(value: "Nothing Ear") {
+                    Label("Nothing Ear", systemImage: "airpodspro")
+                }
 //                NavigationLink(value: "Downloads") {
 //                    Label("Downloads", systemImage: "square.and.arrow.down")
 //                }
@@ -83,6 +86,8 @@ struct SettingsView: View {
                     HUD()
                 case "Battery":
                     Charge()
+                case "Nothing Ear":
+                    NothingEarSettingsView()
                 case "Shelf":
                     Shelf()
                 case "Shortcuts":
