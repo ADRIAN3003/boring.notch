@@ -23,6 +23,7 @@ struct ContentView: View {
     @ObservedObject var batteryModel = BatteryStatusViewModel.shared
     @ObservedObject var brightnessManager = BrightnessManager.shared
     @ObservedObject var volumeManager = VolumeManager.shared
+    @ObservedObject var nothingEarManager = DeviceManager.shared
     @State private var hoverTask: Task<Void, Never>?
     @State private var isHovering: Bool = false
     @State private var anyDropDebounceTask: Task<Void, Never>?
@@ -69,7 +70,7 @@ struct ContentView: View {
             && vm.notchState == .closed && (musicManager.isPlaying || !musicManager.isPlayerIdle)
             && coordinator.musicLiveActivityEnabled && !vm.hideOnClosed
         {
-            chinWidth += (2 * max(0, vm.effectiveClosedNotchHeight - 12) + 20)
+            chinWidth += (2 * musicActivitySideWidth + 20)
         } else if !coordinator.expandingView.show && vm.notchState == .closed
             && (!musicManager.isPlaying && musicManager.isPlayerIdle) && Defaults[.showNotHumanFace]
             && !vm.hideOnClosed
@@ -78,6 +79,22 @@ struct ContentView: View {
         }
 
         return chinWidth
+    }
+
+    /// Battery of the connected Nothing earbuds, shown in place of the music
+    /// visualizer. Uses the lower bud, since that's the one that runs out first.
+    private var earbudsBatteryLevel: Int? {
+        let state = nothingEarManager.state
+        guard state.isConnected else { return nil }
+        return [state.leftBattery.level, state.rightBattery.level].compactMap { $0 }.min()
+    }
+
+    /// Width of each side of the music live activity. Both sides grow by the
+    /// same amount when the earbud battery is shown so the activity stays
+    /// centred on the physical notch.
+    private var musicActivitySideWidth: CGFloat {
+        let square = max(0, vm.effectiveClosedNotchHeight - 12)
+        return earbudsBatteryLevel == nil ? square : max(square, 42)
     }
 
     var body: some View {
@@ -418,6 +435,7 @@ struct ContentView: View {
                     width: max(0, vm.effectiveClosedNotchHeight - 12),
                     height: max(0, vm.effectiveClosedNotchHeight - 12)
                 )
+                .frame(width: musicActivitySideWidth, alignment: .leading)
 
             Rectangle()
                 .fill(.black)
@@ -467,7 +485,10 @@ struct ContentView: View {
                 )
 
             HStack {
-                if useMusicVisualizer {
+                if let earbudsBatteryLevel {
+                    EarbudsBatteryIndicator(level: earbudsBatteryLevel)
+                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                } else if useMusicVisualizer {
                     Rectangle()
                         .fill(
                             Defaults[.coloredSpectrogram]
@@ -488,20 +509,43 @@ struct ContentView: View {
             .frame(
                 width: max(
                     0,
-                    vm.effectiveClosedNotchHeight - 12
+                    musicActivitySideWidth
                         + gestureProgress / 2
                 ),
                 height: max(
                     0,
                     vm.effectiveClosedNotchHeight - 12
                 ),
-                alignment: .center
+                alignment: earbudsBatteryLevel == nil ? .center : .trailing
             )
         }
         .frame(
             height: vm.effectiveClosedNotchHeight,
             alignment: .center
         )
+        .animation(.smooth, value: earbudsBatteryLevel == nil)
+    }
+
+    @ViewBuilder
+    func EarbudsBatteryIndicator(level: Int) -> some View {
+        // Same colour source as the visualizer it replaces.
+        let tint = Defaults[.coloredSpectrogram] ? Color(nsColor: musicManager.avgColor) : Color.gray
+
+        HStack(spacing: 3) {
+            Image(systemName: "airpodspro")
+                .imageScale(.small)
+                .foregroundStyle(tint.opacity(0.75))
+            Text("\(level)%")
+                .monospacedDigit()
+                .foregroundStyle(level <= 20 ? Color.red : tint)
+                .animation(.smooth, value: musicManager.avgColor)
+                .contentTransition(.numericText(value: Double(level)))
+                .animation(.smooth, value: level)
+        }
+        .font(.subheadline)
+        .fontWeight(.medium)
+        .lineLimit(1)
+        .fixedSize()
     }
 
     @ViewBuilder
