@@ -1,34 +1,41 @@
 import AppKit
+import Defaults
 import SwiftUI
 
 /// The Nothing / CMF control surface that lives in the expanded notch.
 ///
-/// The panel deliberately uses the same small, dark surfaces as the rest of
-/// Boring Notch. The full feature set is available from the two anchored
-/// control popovers, while the controls people use most stay one click away.
+/// Laid out like the music player on the home tab: a square device tile on
+/// the left, title and status in the same type styles as song and artist, a
+/// battery row that mirrors the playback slider, and a toolbar underneath.
+/// Everything that isn't used daily lives in the two anchored popovers.
 @MainActor
 struct NothingEarView: View {
     @EnvironmentObject private var vm: BoringViewModel
     @ObservedObject private var deviceManager = DeviceManager.shared
-    @State private var showingEqualizer = false
-    @State private var showingAdvancedControls = false
+    @State private var showingSound = false
+    @State private var showingMore = false
+
+    private var state: DeviceState { deviceManager.state }
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
+        HStack(alignment: .top) {
+            EarDeviceArtwork(isConnected: state.isConnected)
+                .padding(.all, 5)
+
             Group {
-                if deviceManager.state.isConnected {
+                if state.isConnected {
                     connectedContent
                 } else {
                     disconnectedContent
                 }
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 8)
+            .padding(.top, 10)
+            .padding(.leading, 5)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         // Padding belongs inside the tab's slot. Padding on the outside makes
         // SwiftUI report a different height for this tab than Home and Shelf.
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .clipped()
         .onAppear {
             deviceManager.start()
             updatePopoverActivity()
@@ -36,451 +43,362 @@ struct NothingEarView: View {
         .onDisappear {
             vm.isEarPopoverActive = false
         }
-        .onChange(of: showingEqualizer) { _, _ in
+        .onChange(of: showingSound) { _, _ in
             updatePopoverActivity()
         }
-        .onChange(of: showingAdvancedControls) { _, _ in
+        .onChange(of: showingMore) { _, _ in
             updatePopoverActivity()
         }
-        .onChange(of: deviceManager.state.isConnected) { _, connected in
+        .onChange(of: state.isConnected) { _, connected in
             if !connected {
-                showingEqualizer = false
-                showingAdvancedControls = false
+                showingSound = false
+                showingMore = false
             }
         }
     }
+
+    // MARK: - Connected
 
     private var connectedContent: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            connectedHeader
-
-            HStack(spacing: 8) {
-                modeControlRail
-
-                if deviceManager.state.capabilities.supportsEqualizer {
-                    Button {
-                        showingEqualizer = true
-                    } label: {
-                        EarControlLabel(
-                            title: deviceManager.state.equalizer.title,
-                            symbol: "slider.horizontal.3"
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .frame(width: 104, height: 43)
-                    .earSurface()
-                    .popover(isPresented: $showingEqualizer, arrowEdge: .bottom) {
-                        NothingEarEqualizerPanel()
-                    }
-                }
-
-                Button {
-                    showingAdvancedControls = true
-                } label: {
-                    EarControlLabel(title: "More", symbol: "ellipsis")
-                }
-                .buttonStyle(.plain)
-                .frame(width: 72, height: 43)
-                .earSurface()
-                .popover(isPresented: $showingAdvancedControls, arrowEdge: .bottom) {
-                    NothingEarAdvancedPanel()
-                }
-            }
-            .frame(maxWidth: .infinity, minHeight: 43, maxHeight: 43, alignment: .leading)
-
-            quickOptionsRow
-        }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-    }
-
-    private var connectedHeader: some View {
-        HStack(spacing: 9) {
-            EarDeviceGlyph(isConnected: true)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(deviceManager.state.descriptor?.name ?? "Nothing Ear")
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(state.descriptor?.name ?? "Nothing Ear")
+                    .font(.headline)
                     .foregroundStyle(.white)
                     .lineLimit(1)
-
-                HStack(spacing: 5) {
-                    Circle()
-                        .fill(Color.effectiveAccent)
-                        .frame(width: 5, height: 5)
-                    Text(deviceManager.state.connection.label)
-                    if let firmware = deviceManager.state.descriptor?.firmware,
-                       !firmware.isEmpty
-                    {
-                        Text("·")
-                            .foregroundStyle(.white.opacity(0.25))
-                        Text("FW \(firmware)")
-                            .lineLimit(1)
-                    }
-                }
-                .font(.system(size: 9, weight: .medium, design: .rounded))
-                .foregroundStyle(.white.opacity(0.42))
+                Text(connectedSubtitle)
+                    .font(.headline)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.gray)
+                    .lineLimit(1)
+                    .contentTransition(.opacity)
             }
 
-            Spacer(minLength: 8)
-            batterySummary
-        }
-        .frame(height: 34)
-    }
-
-    @ViewBuilder
-    private var modeControlRail: some View {
-        HStack(spacing: 2) {
-            if deviceManager.state.capabilities.supportsNoiseControl {
-                EarModeSegment(
-                    title: ancSegmentTitle,
-                    symbol: "waveform.path.ecg",
-                    isSelected: isANCSelected,
-                    action: { deviceManager.setNoiseControl(deviceManager.state.noiseControl.selectedANCMode) }
-                )
-
-                if deviceManager.state.capabilities.supportsTransparency {
-                    EarModeSegment(
-                        title: "Ambient",
-                        symbol: "ear",
-                        isSelected: deviceManager.state.noiseControl == .transparency,
-                        action: { deviceManager.setNoiseControl(.transparency) }
-                    )
-                }
-
-                EarModeSegment(
-                    title: "Off",
-                    symbol: "speaker.slash",
-                    isSelected: deviceManager.state.noiseControl == .off,
-                    action: { deviceManager.setNoiseControl(.off) }
-                )
-            } else {
-                EarControlLabel(title: "Listening", symbol: "waveform")
+            HStack(spacing: 14) {
+                EarBatteryGauge(title: "Left", status: state.leftBattery)
+                EarBatteryGauge(title: "Right", status: state.rightBattery)
+                EarBatteryGauge(title: "Case", status: state.caseBattery)
             }
-        }
-        .padding(3)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .earSurface()
-    }
+            .padding(.top, 10)
 
-    private var batterySummary: some View {
-        HStack(spacing: 8) {
-            CompactEarBattery(title: "L", status: deviceManager.state.leftBattery)
-            CompactEarBattery(title: "R", status: deviceManager.state.rightBattery)
-            CompactEarBattery(title: "C", status: deviceManager.state.caseBattery)
+            Spacer(minLength: 0)
+
+            toolbar
         }
     }
 
-    private var quickOptionsRow: some View {
+    private var toolbar: some View {
         HStack(spacing: 6) {
-            if deviceManager.state.capabilities.supportsBassEnhance {
-                EarOptionChip(
-                    title: "Bass",
-                    symbol: "waveform",
-                    isOn: deviceManager.state.bassEnhanceEnabled,
-                    action: {
-                        deviceManager.setBass(
-                            enabled: !deviceManager.state.bassEnhanceEnabled,
-                            level: deviceManager.state.bassLevel
-                        )
-                    }
-                )
+            if state.capabilities.supportsNoiseControl {
+                EarModeSwitcher()
             }
 
-            if deviceManager.state.capabilities.supportsLowLatency {
-                EarOptionChip(
-                    title: "Low latency",
-                    symbol: "timer",
-                    isOn: deviceManager.state.lowLatencyEnabled,
-                    action: { deviceManager.setLowLatency(!deviceManager.state.lowLatencyEnabled) }
-                )
-            }
-
-            if deviceManager.state.capabilities.supportsInEarDetection {
-                EarOptionChip(
-                    title: "In-ear",
-                    symbol: "ear",
-                    isOn: deviceManager.state.inEarDetectionEnabled,
-                    action: { deviceManager.setInEarDetection(!deviceManager.state.inEarDetectionEnabled) }
-                )
-            }
-
-            Spacer(minLength: 2)
+            Spacer(minLength: 0)
 
             if let error = deviceManager.lastError {
-                Text(error)
-                    .font(.system(size: 9, weight: .medium, design: .rounded))
-                    .foregroundStyle(.orange.opacity(0.85))
-                    .lineLimit(1)
+                errorLabel(error)
+            }
+
+            if hasSoundControls {
+                HoverButton(
+                    icon: "slider.horizontal.3",
+                    iconColor: showingSound ? .effectiveAccent : .primary,
+                    scale: .medium
+                ) {
+                    showingSound.toggle()
+                }
+                .help("Sound")
+                .popover(isPresented: $showingSound, arrowEdge: .bottom) {
+                    NothingEarSoundPanel()
+                }
+            }
+
+            HoverButton(
+                icon: "ellipsis",
+                iconColor: showingMore ? .effectiveAccent : .primary,
+                scale: .medium
+            ) {
+                showingMore.toggle()
+            }
+            .help("More controls")
+            .popover(isPresented: $showingMore, arrowEdge: .bottom) {
+                NothingEarMorePanel(onDismiss: { showingMore = false })
             }
         }
-        .frame(height: 26)
+        .frame(height: 30)
+        .padding(.bottom, 4)
     }
 
-    private var disconnectedContent: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(spacing: 9) {
-                EarDeviceGlyph(isConnected: false)
+    private var connectedSubtitle: String {
+        var parts: [String] = []
+        if state.capabilities.supportsNoiseControl {
+            parts.append(state.noiseControl.title)
+        }
+        if state.capabilities.supportsEqualizer {
+            parts.append(state.equalizer.title)
+        }
+        return parts.isEmpty ? state.connection.label : parts.joined(separator: " · ")
+    }
 
-                VStack(alignment: .leading, spacing: 2) {
+    private var hasSoundControls: Bool {
+        state.capabilities.supportsEqualizer
+            || state.capabilities.supportsCustomEQ
+            || state.capabilities.supportsBassEnhance
+    }
+
+    // MARK: - Disconnected
+
+    private var disconnectedContent: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 0) {
                     Text("Nothing Ear")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .font(.headline)
                         .foregroundStyle(.white)
                     Text(connectionSubtitle)
-                        .font(.system(size: 10, weight: .medium, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.52))
+                        .font(.headline)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.gray)
                         .lineLimit(1)
                 }
 
                 Spacer(minLength: 8)
 
-                if deviceManager.state.connection == .connecting
-                    || deviceManager.state.connection == .reconnecting
-                {
+                if isBusy {
                     ProgressView()
                         .controlSize(.small)
-                        .tint(Color.effectiveAccent)
-                        .frame(width: 28, height: 28)
+                        .frame(width: 30, height: 30)
                 } else {
-                    EarCircleAction(symbol: "arrow.clockwise") {
+                    HoverButton(icon: "arrow.clockwise", scale: .medium) {
                         deviceManager.refreshDiscovery()
                     }
+                    .help("Look for devices")
                 }
             }
-            .frame(height: 34)
 
             if deviceManager.discoveredDevices.isEmpty {
-                HStack(spacing: 9) {
-                    Image(systemName: "dot.radiowaves.left.and.right")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Color.effectiveAccent)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Pair a Nothing or CMF device in Bluetooth settings, then refresh.")
+                        .font(.caption)
+                        .foregroundStyle(Color(white: 0.65))
+                        .lineLimit(2)
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("No earbuds selected")
-                            .font(.system(size: 11, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.82))
-                        Text("Pair a Nothing or CMF device, then refresh this tab.")
-                            .font(.system(size: 10, weight: .medium, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.46))
-                            .lineLimit(1)
+                    Button(action: openBluetoothSettings) {
+                        Label("Bluetooth Settings", systemImage: "gearshape")
+                            .font(.caption)
+                            .fontWeight(.medium)
                     }
-                    Spacer(minLength: 0)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.effectiveAccent)
                 }
-                .padding(.horizontal, 11)
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                .earSurface()
+                .padding(.top, 10)
             } else {
-                VStack(spacing: 5) {
+                VStack(spacing: 2) {
                     ForEach(Array(deviceManager.discoveredDevices.prefix(2))) { device in
                         EarDiscoveredDeviceRow(device: device) {
                             deviceManager.connect(to: device)
                         }
                     }
                 }
+                .padding(.top, 6)
+                .padding(.leading, -8)
             }
 
+            Spacer(minLength: 0)
+
             if let error = deviceManager.lastError {
-                Text(error)
-                    .font(.system(size: 9, weight: .medium, design: .rounded))
-                    .foregroundStyle(.orange.opacity(0.85))
-                    .lineLimit(1)
+                errorLabel(error)
+                    .padding(.bottom, 4)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private var isBusy: Bool {
+        state.connection == .connecting
+            || state.connection == .reconnecting
+            || state.connection == .discovering
     }
 
     private var connectionSubtitle: String {
-        switch deviceManager.state.connection {
+        switch state.connection {
         case .connecting, .reconnecting, .discovering:
-            return deviceManager.state.connection.label
+            return state.connection.label + "…"
         case .failed:
             return "Couldn’t connect automatically"
         default:
-            return "Ready to connect"
+            return deviceManager.discoveredDevices.isEmpty ? "No earbuds found" : "Choose your earbuds"
         }
     }
 
-    private var isANCSelected: Bool {
-        if case .noiseCancellation = deviceManager.state.noiseControl { return true }
-        return false
+    // MARK: - Helpers
+
+    private func errorLabel(_ error: String) -> some View {
+        Label(error, systemImage: "exclamationmark.triangle.fill")
+            .font(.caption)
+            .foregroundStyle(.orange)
+            .lineLimit(1)
+            .truncationMode(.tail)
     }
 
-    private var ancSegmentTitle: String {
-        guard case let .noiseCancellation(level) = deviceManager.state.noiseControl else {
-            return "ANC"
-        }
-        return switch level {
-        case 1: "ANC · Low"
-        case 2: "ANC · Mid"
-        case 3: "ANC · High"
-        case 4: "ANC · Adaptive"
-        default: "ANC"
+    private func openBluetoothSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.BluetoothSettings") {
+            NSWorkspace.shared.open(url)
         }
     }
 
     private func updatePopoverActivity() {
-        vm.isEarPopoverActive = showingEqualizer || showingAdvancedControls
+        vm.isEarPopoverActive = showingSound || showingMore
     }
 }
 
-private extension View {
-    func earSurface(cornerRadius: CGFloat = 13) -> some View {
-        background(
-            Color.white.opacity(0.065),
-            in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .stroke(Color.white.opacity(0.10), lineWidth: 0.7)
-        }
-    }
-}
+// MARK: - Notch components
 
-private struct EarDeviceGlyph: View {
+/// Stands in for the album art on the home tab: same corner radius, same
+/// "paused" shrink when nothing is connected, and the same accent glow as the
+/// album-art lighting effect.
+private struct EarDeviceArtwork: View {
     let isConnected: Bool
 
+    private var cornerRadius: CGFloat {
+        Defaults[.cornerRadiusScaling]
+            ? MusicPlayerImageSizes.cornerRadiusInset.opened
+            : MusicPlayerImageSizes.cornerRadiusInset.closed
+    }
+
     var body: some View {
-        Image(systemName: "airpodspro")
-            .font(.system(size: 15, weight: .semibold))
-            .foregroundStyle(isConnected ? Color.effectiveAccent : .white.opacity(0.68))
-            .frame(width: 31, height: 31)
-            .background(
-                isConnected ? Color.effectiveAccent.opacity(0.14) : Color.white.opacity(0.08),
-                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-            )
+        ZStack {
+            if Defaults[.lightingEffect] {
+                RoundedRectangle(cornerRadius: cornerRadius)
+                    .fill(Color.effectiveAccent)
+                    .scaleEffect(x: 1.1, y: 1.2)
+                    .blur(radius: 40)
+                    .opacity(isConnected ? 0.35 : 0)
+            }
+
+            RoundedRectangle(cornerRadius: cornerRadius)
+                .fill(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.14), Color.white.opacity(0.05)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .overlay {
+                    Image(systemName: "airpodspro")
+                        .font(.system(size: 46, weight: .light))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(isConnected ? Color.white : Color.gray)
+                }
+        }
+        .aspectRatio(1, contentMode: .fit)
+        .scaleEffect(isConnected ? 1 : 0.85)
+        .animation(.smooth, value: isConnected)
     }
 }
 
-private struct CompactEarBattery: View {
+/// A battery level drawn the same way as the music progress bar, with the
+/// colours `BatteryView` uses for low and charging states.
+private struct EarBatteryGauge: View {
     let title: String
     let status: BatteryStatus
 
+    private var fill: Color {
+        guard let level = status.level else { return .clear }
+        if status.isCharging { return .green }
+        if level <= 20 { return .red }
+        return .white
+    }
+
     var body: some View {
-        HStack(spacing: 4) {
-            ZStack {
-                Circle()
-                    .stroke(Color.white.opacity(0.14), lineWidth: 2)
-                if let level = status.level {
-                    Circle()
-                        .trim(from: 0, to: CGFloat(level) / 100)
-                        .stroke(
-                            level <= 20 ? Color.orange : Color.effectiveAccent,
-                            style: StrokeStyle(lineWidth: 2, lineCap: .round)
-                        )
-                        .rotationEffect(.degrees(-90))
+        VStack(alignment: .leading, spacing: 4) {
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(.gray.opacity(0.3))
+                    Capsule()
+                        .fill(fill)
+                        .frame(width: geometry.size.width * CGFloat(status.level ?? 0) / 100)
                 }
             }
-            .frame(width: 18, height: 18)
+            .frame(height: 5)
 
-            VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 3) {
                 Text(title)
-                    .font(.system(size: 8, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.42))
+                Spacer(minLength: 2)
+                if status.isCharging {
+                    Image(systemName: "bolt.fill")
+                        .foregroundStyle(.green)
+                }
                 Text(status.level.map { "\($0)%" } ?? "—")
-                    .font(.system(size: 9, weight: .bold, design: .rounded))
-                    .foregroundStyle(
-                        status.level.map { $0 <= 20 ? Color.orange : .white.opacity(0.82) }
-                            ?? .white.opacity(0.42)
-                    )
+                    .monospacedDigit()
             }
-
-            if status.isCharging {
-                Image(systemName: "bolt.fill")
-                    .font(.system(size: 7, weight: .bold))
-                    .foregroundStyle(Color.effectiveAccent)
-            }
+            .font(.caption)
+            .fontWeight(.medium)
+            .foregroundStyle(.gray)
         }
-        .fixedSize(horizontal: true, vertical: false)
+        .frame(maxWidth: .infinity)
+        .animation(.smooth, value: status)
     }
 }
 
-private struct EarModeSegment: View {
-    let title: String
-    let symbol: String
-    let isSelected: Bool
-    let action: () -> Void
+/// Noise control modes, drawn like the tab switcher in the notch header.
+@MainActor
+private struct EarModeSwitcher: View {
+    @ObservedObject private var deviceManager = DeviceManager.shared
+    @Namespace private var animation
 
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: symbol)
-                    .font(.system(size: 11, weight: .semibold))
-                Text(title)
-                    .font(.system(size: 9, weight: .semibold, design: .rounded))
-                    .lineLimit(1)
-            }
-            .foregroundStyle(isSelected ? .white : .white.opacity(0.70))
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(
-                isSelected ? Color.effectiveAccent : Color.clear,
-                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-            )
-        }
-        .buttonStyle(.plain)
+    private struct Mode: Identifiable {
+        let id: String
+        let title: String
+        let target: NoiseControlMode
+        let isSelected: Bool
     }
-}
 
-private struct EarControlLabel: View {
-    let title: String
-    let symbol: String
+    private var modes: [Mode] {
+        let current = deviceManager.state.noiseControl
+        var modes: [Mode] = []
 
-    var body: some View {
-        VStack(spacing: 5) {
-            Image(systemName: symbol)
-                .font(.system(size: 12, weight: .semibold))
-            Text(title)
-                .font(.system(size: 9, weight: .semibold, design: .rounded))
-                .lineLimit(1)
+        let ancSelected: Bool = {
+            if case .noiseCancellation = current { return true }
+            return false
+        }()
+        modes.append(Mode(id: "anc", title: "Noise Cancelling", target: current.selectedANCMode, isSelected: ancSelected))
+
+        if deviceManager.state.capabilities.supportsTransparency {
+            modes.append(Mode(id: "transparency", title: "Transparency", target: .transparency, isSelected: current == .transparency))
         }
-        .foregroundStyle(.white.opacity(0.78))
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
 
-private struct EarOptionChip: View {
-    let title: String
-    let symbol: String
-    let isOn: Bool
-    let action: () -> Void
+        modes.append(Mode(id: "off", title: "Off", target: .off, isSelected: current == .off))
+        return modes
+    }
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: symbol)
-                    .font(.system(size: 9, weight: .semibold))
-                Text(title)
-                    .font(.system(size: 8, weight: .semibold, design: .rounded))
-                    .lineLimit(1)
-            }
-            .foregroundStyle(isOn ? .white : .white.opacity(0.60))
-            .padding(.horizontal, 8)
-            .frame(height: 24)
-            .background(
-                isOn ? Color.effectiveAccent : Color.white.opacity(0.075),
-                in: Capsule()
-            )
-            .overlay {
-                Capsule()
-                    .stroke(Color.white.opacity(isOn ? 0.26 : 0.10), lineWidth: 0.7)
+        HStack(spacing: 0) {
+            ForEach(modes) { mode in
+                Button {
+                    deviceManager.setNoiseControl(mode.target)
+                } label: {
+                    Text(mode.title)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .lineLimit(1)
+                        .padding(.horizontal, 12)
+                        .frame(height: 26)
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(mode.isSelected ? .white : .gray)
+                .background {
+                    if mode.isSelected {
+                        Capsule()
+                            .fill(Color(nsColor: .secondarySystemFill))
+                            .matchedGeometryEffect(id: "capsule", in: animation)
+                    }
+                }
             }
         }
-        .buttonStyle(.plain)
-    }
-}
-
-private struct EarCircleAction: View {
-    let symbol: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(.white.opacity(0.78))
-                .frame(width: 28, height: 28)
-                .background(Color.white.opacity(0.08), in: Circle())
-                .overlay(Circle().stroke(Color.white.opacity(0.12), lineWidth: 0.7))
-        }
-        .buttonStyle(.plain)
+        .clipShape(Capsule())
+        .animation(.smooth, value: deviceManager.state.noiseControl)
     }
 }
 
@@ -488,118 +406,191 @@ private struct EarDiscoveredDeviceRow: View {
     let device: BluetoothDeviceRecord
     let action: () -> Void
 
+    @State private var isHovering = false
+
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 9) {
+            HStack(spacing: 8) {
                 Image(systemName: "airpodspro")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Color.effectiveAccent)
-                    .frame(width: 27, height: 27)
-                    .background(Color.effectiveAccent.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .foregroundStyle(.gray)
+                    .frame(width: 18)
 
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: 0) {
                     Text(device.name)
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.86))
+                        .font(.callout)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.white)
                         .lineLimit(1)
-                    Text(device.isConnected ? "Connected over Bluetooth" : "Nearby device")
-                        .font(.system(size: 9, weight: .medium, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.42))
+                    Text(device.isConnected ? "Connected to this Mac" : "Nearby")
+                        .font(.caption)
+                        .foregroundStyle(Color(white: 0.65))
                 }
 
                 Spacer(minLength: 6)
 
-                Image(systemName: "arrow.right")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.55))
+                Text("Connect")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Color.effectiveAccent)
             }
-            .padding(.horizontal, 10)
-            .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
-            .earSurface(cornerRadius: 11)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                isHovering ? Color.gray.opacity(0.2) : .clear,
+                in: RoundedRectangle(cornerRadius: 8)
+            )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.smooth(duration: 0.3)) {
+                isHovering = hovering
+            }
+        }
+    }
+}
+
+// MARK: - Popovers
+
+/// Shared chrome for both popovers, matching `BatteryMenuView`.
+private struct EarPopover<Content: View>: View {
+    let title: String
+    let detail: String?
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(title)
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                    .lineLimit(1)
+                Spacer()
+                if let detail {
+                    Text(detail)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            content()
+        }
+        .padding()
+        .frame(width: 290)
+        .tint(.effectiveAccent)
+    }
+}
+
+private struct EarSectionHeader: View {
+    let title: String
+
+    var body: some View {
+        Text(title)
+            .font(.caption)
+            .fontWeight(.medium)
+            .foregroundStyle(.secondary)
+    }
+}
+
+private struct EarToggleRow: View {
+    let title: String
+    let systemImage: String
+    @Binding var isOn: Bool
+
+    var body: some View {
+        Toggle(isOn: $isOn) {
+            Label(title, systemImage: systemImage)
+                .font(.subheadline)
+        }
+        .toggleStyle(.switch)
+        .controlSize(.mini)
     }
 }
 
 @MainActor
-private struct NothingEarEqualizerPanel: View {
+private struct NothingEarSoundPanel: View {
     @ObservedObject private var deviceManager = DeviceManager.shared
 
+    private var state: DeviceState { deviceManager.state }
+
     var body: some View {
-        EarPopoverContainer(
-            title: "Equalizer",
-            subtitle: deviceManager.state.descriptor?.name ?? "Sound profile"
-        ) {
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(EqualizerPreset.allCases, id: \.self) { preset in
-                    Button {
-                        deviceManager.setEqualizer(preset)
-                    } label: {
-                        HStack(spacing: 8) {
-                            Text(preset.title)
-                            Spacer()
-                            if deviceManager.state.equalizer == preset {
-                                Image(systemName: "checkmark")
-                                    .font(.system(size: 10, weight: .bold))
-                                    .foregroundStyle(Color.effectiveAccent)
-                            }
+        EarPopover(title: "Sound", detail: state.capabilities.supportsEqualizer ? state.equalizer.title : nil) {
+            if state.capabilities.supportsEqualizer {
+                VStack(alignment: .leading, spacing: 6) {
+                    EarSectionHeader(title: "Equalizer")
+                    Picker("Equalizer", selection: Binding(
+                        get: { state.equalizer },
+                        set: { deviceManager.setEqualizer($0) }
+                    )) {
+                        ForEach(EqualizerPreset.allCases, id: \.self) { preset in
+                            Text(preset.title).tag(preset)
                         }
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.84))
-                        .padding(.horizontal, 10)
-                        .frame(height: 30)
-                        .background(
-                            deviceManager.state.equalizer == preset
-                                ? Color.effectiveAccent.opacity(0.18)
-                                : Color.white.opacity(0.055),
-                            in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    }
+                    .pickerStyle(.radioGroup)
+                    .labelsHidden()
+                    .font(.subheadline)
+                }
+            }
+
+            if state.capabilities.supportsCustomEQ {
+                Divider()
+
+                VStack(alignment: .leading, spacing: 6) {
+                    EarSectionHeader(title: "Custom EQ")
+                    ForEach(Array(["Bass", "Mid", "Treble"].enumerated()), id: \.offset) { index, title in
+                        EarSliderRow(
+                            title: title,
+                            value: customEQBinding(index: index),
+                            range: -12...12,
+                            format: "%+.1f dB"
                         )
                     }
-                    .buttonStyle(.plain)
-                }
-
-                if deviceManager.state.capabilities.supportsCustomEQ {
-                    Divider().overlay(Color.white.opacity(0.10))
-                    Text("CUSTOM EQ")
-                        .font(.system(size: 8, weight: .bold, design: .rounded))
-                        .tracking(1.1)
-                        .foregroundStyle(.white.opacity(0.36))
-
-                    ForEach(Array(["Bass", "Presence", "Treble"].enumerated()), id: \.offset) { index, title in
-                        HStack(spacing: 8) {
-                            Text(title)
-                                .font(.system(size: 10, weight: .medium, design: .rounded))
-                                .foregroundStyle(.white.opacity(0.64))
-                                .frame(width: 58, alignment: .leading)
-                            Slider(value: customEQBinding(index: index), in: -12...12, step: 0.5)
-                            Text(String(format: "%+.1f", customEQValue(at: index)))
-                                .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(.white.opacity(0.48))
-                                .frame(width: 34, alignment: .trailing)
-                        }
-                    }
-
-                    EarPanelToggle(
+                    EarToggleRow(
                         title: "Advanced EQ",
-                        symbol: "slider.horizontal.2.square",
-                        isOn: deviceManager.state.advancedEQEnabled,
-                        action: { deviceManager.setAdvancedEQ(!deviceManager.state.advancedEQEnabled) }
+                        systemImage: "slider.vertical.3",
+                        isOn: Binding(
+                            get: { state.advancedEQEnabled },
+                            set: { deviceManager.setAdvancedEQ($0) }
+                        )
                     )
+                    .padding(.top, 2)
+                }
+            }
+
+            if state.capabilities.supportsBassEnhance {
+                Divider()
+
+                VStack(alignment: .leading, spacing: 6) {
+                    EarToggleRow(
+                        title: "Bass Enhance",
+                        systemImage: "speaker.wave.3",
+                        isOn: Binding(
+                            get: { state.bassEnhanceEnabled },
+                            set: { deviceManager.setBass(enabled: $0, level: state.bassLevel) }
+                        )
+                    )
+                    if state.bassEnhanceEnabled {
+                        EarSliderRow(
+                            title: "Level",
+                            value: Binding(
+                                get: { state.bassLevel },
+                                set: { deviceManager.setBass(enabled: true, level: $0) }
+                            ),
+                            range: 0...10,
+                            format: "%.1f"
+                        )
+                    }
                 }
             }
         }
     }
 
-    private func customEQValue(at index: Int) -> Double {
-        guard deviceManager.state.customEQ.indices.contains(index) else { return 0 }
-        return deviceManager.state.customEQ[index]
-    }
-
     private func customEQBinding(index: Int) -> Binding<Double> {
         Binding(
-            get: { customEQValue(at: index) },
+            get: { state.customEQ.indices.contains(index) ? state.customEQ[index] : 0 },
             set: { value in
-                var levels = deviceManager.state.customEQ
+                var levels = state.customEQ
                 while levels.count < 3 { levels.append(0) }
                 levels[index] = value
                 deviceManager.setCustomEQ(levels)
@@ -608,140 +599,204 @@ private struct NothingEarEqualizerPanel: View {
     }
 }
 
-@MainActor
-private struct NothingEarAdvancedPanel: View {
-    @ObservedObject private var deviceManager = DeviceManager.shared
-    @State private var caseLEDColors: [Color] = Array(repeating: .white, count: 5)
+private struct EarSliderRow: View {
+    let title: String
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    let format: String
 
     var body: some View {
-        EarPopoverContainer(
-            title: "More controls",
-            subtitle: deviceManager.state.descriptor?.firmware.map { "Firmware \($0)" } ?? "Device features"
+        HStack(spacing: 8) {
+            Text(title)
+                .font(.subheadline)
+                .frame(width: 48, alignment: .leading)
+            Slider(value: $value, in: range, step: 0.5)
+                .controlSize(.small)
+            Text(String(format: format, value))
+                .font(.caption)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .frame(width: 52, alignment: .trailing)
+        }
+    }
+}
+
+@MainActor
+private struct NothingEarMorePanel: View {
+    let onDismiss: () -> Void
+
+    @ObservedObject private var deviceManager = DeviceManager.shared
+    @State private var caseLEDColors: [Color] = Array(repeating: .white, count: 5)
+    @State private var showingGestures = false
+
+    private var state: DeviceState { deviceManager.state }
+    private var capabilities: DeviceCapabilities { state.capabilities }
+
+    var body: some View {
+        EarPopover(
+            title: state.descriptor?.name ?? "Nothing Ear",
+            detail: state.descriptor?.firmware.flatMap { $0.isEmpty ? nil : "v\($0)" }
         ) {
-            VStack(alignment: .leading, spacing: 8) {
-                if deviceManager.state.capabilities.supportsPersonalizedANC {
-                    EarPanelToggle(
-                        title: "Personalized ANC",
-                        symbol: "waveform.path.ecg.rectangle",
-                        isOn: deviceManager.state.personalizedANCEnabled,
-                        action: { deviceManager.setPersonalizedANC(!deviceManager.state.personalizedANCEnabled) }
-                    )
-                }
-
-                if deviceManager.state.capabilities.supportsEarTipFitTest {
-                    Button {
-                        deviceManager.runEarTipFitTest()
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "ear")
-                            Text("Run ear tip fit test")
-                            Spacer()
-                            if let result = deviceManager.state.earTipFitResult {
-                                Text("L \(fitLabel(result.left)) · R \(fitLabel(result.right))")
-                                    .font(.system(size: 9, weight: .medium, design: .rounded))
-                                    .foregroundStyle(.white.opacity(0.48))
-                            } else {
-                                Image(systemName: "arrow.right")
-                                    .font(.system(size: 10, weight: .bold))
-                                    .foregroundStyle(.white.opacity(0.45))
-                            }
+            if capabilities.supportsANCStrength || capabilities.supportsPersonalizedANC {
+                VStack(alignment: .leading, spacing: 6) {
+                    EarSectionHeader(title: "Noise Cancelling")
+                    if capabilities.supportsANCStrength {
+                        Picker("Strength", selection: ancLevelBinding) {
+                            Text("Low").tag(1)
+                            Text("Mid").tag(2)
+                            Text("High").tag(3)
+                            Text("Adaptive").tag(4)
                         }
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.82))
-                        .padding(.horizontal, 10)
-                        .frame(height: 31)
-                        .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .controlSize(.small)
                     }
-                    .buttonStyle(.plain)
-                }
-
-                if deviceManager.state.capabilities.supportsFindMyEarbuds {
-                    HStack(spacing: 6) {
-                        Label("Find earbuds", systemImage: "location.fill")
-                            .font(.system(size: 10, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.78))
-                        Spacer()
-                        EarSmallAction(title: "L") { deviceManager.ring(.left, enabled: true) }
-                        EarSmallAction(title: "R") { deviceManager.ring(.right, enabled: true) }
-                        EarSmallAction(title: "Stop") { deviceManager.ring(nil, enabled: false) }
-                    }
-                }
-
-                if deviceManager.state.capabilities.supportsGestures {
-                    Divider().overlay(Color.white.opacity(0.10))
-                    Text("GESTURES")
-                        .font(.system(size: 8, weight: .bold, design: .rounded))
-                        .tracking(1.1)
-                        .foregroundStyle(.white.opacity(0.36))
-
-                    ForEach(GestureSide.allCases, id: \.self) { side in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(side.title)
-                                .font(.system(size: 9, weight: .bold, design: .rounded))
-                                .foregroundStyle(.white.opacity(0.44))
-                            ForEach(GestureKind.allCases, id: \.self) { kind in
-                                gestureMenu(side: side, kind: kind)
-                            }
-                        }
-                    }
-                }
-
-                if deviceManager.state.capabilities.supportsCaseLED {
-                    Divider().overlay(Color.white.opacity(0.10))
-                    HStack {
-                        Text("Case lights")
-                            .font(.system(size: 10, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.75))
-                        Spacer()
-                        ForEach(0..<5, id: \.self) { index in
-                            ColorPicker("", selection: ledBinding(index: index), supportsOpacity: false)
-                                .labelsHidden()
-                                .frame(width: 24, height: 24)
-                        }
+                    if capabilities.supportsPersonalizedANC {
+                        EarToggleRow(
+                            title: "Personalized ANC",
+                            systemImage: "person.crop.circle.badge.checkmark",
+                            isOn: Binding(
+                                get: { state.personalizedANCEnabled },
+                                set: { deviceManager.setPersonalizedANC($0) }
+                            )
+                        )
                     }
                 }
             }
+
+            if capabilities.supportsLowLatency || capabilities.supportsInEarDetection {
+                VStack(alignment: .leading, spacing: 6) {
+                    EarSectionHeader(title: "Listening")
+                    if capabilities.supportsLowLatency {
+                        EarToggleRow(
+                            title: "Low Latency",
+                            systemImage: "gamecontroller",
+                            isOn: Binding(
+                                get: { state.lowLatencyEnabled },
+                                set: { deviceManager.setLowLatency($0) }
+                            )
+                        )
+                    }
+                    if capabilities.supportsInEarDetection {
+                        EarToggleRow(
+                            title: "In-Ear Detection",
+                            systemImage: "ear",
+                            isOn: Binding(
+                                get: { state.inEarDetectionEnabled },
+                                set: { deviceManager.setInEarDetection($0) }
+                            )
+                        )
+                    }
+                }
+            }
+
+            if capabilities.supportsFindMyEarbuds || capabilities.supportsEarTipFitTest {
+                VStack(alignment: .leading, spacing: 8) {
+                    EarSectionHeader(title: "Tools")
+
+                    if capabilities.supportsFindMyEarbuds {
+                        HStack(spacing: 6) {
+                            Label("Find Earbuds", systemImage: "speaker.wave.2")
+                                .font(.subheadline)
+                            Spacer()
+                            Button("Left") { deviceManager.ring(.left, enabled: true) }
+                            Button("Right") { deviceManager.ring(.right, enabled: true) }
+                            Button("Stop") { deviceManager.ring(nil, enabled: false) }
+                        }
+                        .controlSize(.small)
+                    }
+
+                    if capabilities.supportsEarTipFitTest {
+                        HStack(spacing: 6) {
+                            Label("Ear Tip Fit", systemImage: "ear.badge.checkmark")
+                                .font(.subheadline)
+                            Spacer()
+                            if let result = state.earTipFitResult {
+                                Text("L \(fitLabel(result.left)) · R \(fitLabel(result.right))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Button("Test") { deviceManager.runEarTipFitTest() }
+                        }
+                        .controlSize(.small)
+                    }
+                }
+            }
+
+            if capabilities.supportsCaseLED {
+                HStack(spacing: 4) {
+                    Label("Case Lights", systemImage: "light.max")
+                        .font(.subheadline)
+                    Spacer()
+                    ForEach(0..<5, id: \.self) { index in
+                        ColorPicker("", selection: ledBinding(index: index), supportsOpacity: false)
+                            .labelsHidden()
+                    }
+                }
+            }
+
+            if capabilities.supportsGestures {
+                DisclosureGroup(isExpanded: $showingGestures) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(GestureSide.allCases, id: \.self) { side in
+                            VStack(alignment: .leading, spacing: 4) {
+                                EarSectionHeader(title: side.title)
+                                ForEach(GestureKind.allCases, id: \.self) { kind in
+                                    Picker(kind.title, selection: gestureBinding(side: side, kind: kind)) {
+                                        ForEach(GestureAction.allCases, id: \.self) { action in
+                                            Text(action.title).tag(action)
+                                        }
+                                    }
+                                    .pickerStyle(.menu)
+                                    .controlSize(.small)
+                                    .font(.subheadline)
+                                }
+                            }
+                        }
+                    }
+                    .padding(.top, 6)
+                } label: {
+                    Label("Gestures", systemImage: "hand.tap")
+                        .font(.subheadline)
+                }
+            }
+
+            Divider()
+
+            Button(action: openSettings) {
+                Label("Nothing Ear Settings", systemImage: "gearshape")
+                    .fontWeight(.regular)
+            }
+            .frame(maxWidth: .infinity)
+            .buttonStyle(.plain)
+            .padding(.vertical, 2)
         }
         .onAppear(perform: hydrateLEDColors)
-        .onChange(of: deviceManager.state.caseLEDColors) { _, _ in
+        .onChange(of: state.caseLEDColors) { _, _ in
             hydrateLEDColors()
         }
     }
 
-    @ViewBuilder
-    private func gestureMenu(side: GestureSide, kind: GestureKind) -> some View {
-        let currentAction = deviceManager.state.gestures.first {
-            $0.side == side && $0.kind == kind
-        }?.action ?? .noAction
+    private var ancLevelBinding: Binding<Int> {
+        Binding(
+            get: {
+                if case let .noiseCancellation(level) = state.noiseControl { return level }
+                if case let .noiseCancellation(level) = state.noiseControl.selectedANCMode { return level }
+                return 4
+            },
+            set: { deviceManager.setNoiseControl(.noiseCancellation(level: $0)) }
+        )
+    }
 
-        Menu {
-            ForEach(GestureAction.allCases, id: \.self) { action in
-                Button {
-                    deviceManager.setGesture(GestureSetting(side: side, kind: kind, action: action))
-                } label: {
-                    HStack {
-                        Text(action.title)
-                        if currentAction == action { Image(systemName: "checkmark") }
-                    }
-                }
+    private func gestureBinding(side: GestureSide, kind: GestureKind) -> Binding<GestureAction> {
+        Binding(
+            get: {
+                state.gestures.first(where: { $0.side == side && $0.kind == kind })?.action ?? .noAction
+            },
+            set: { action in
+                deviceManager.setGesture(GestureSetting(side: side, kind: kind, action: action))
             }
-        } label: {
-            HStack(spacing: 8) {
-                Text(kind.title)
-                Spacer()
-                Text(currentAction.title)
-                    .foregroundStyle(.white.opacity(0.44))
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.38))
-            }
-            .font(.system(size: 9, weight: .medium, design: .rounded))
-            .foregroundStyle(.white.opacity(0.75))
-            .padding(.horizontal, 9)
-            .frame(height: 27)
-            .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        }
-        .menuStyle(.borderlessButton)
+        )
     }
 
     private func ledBinding(index: Int) -> Binding<Color> {
@@ -756,8 +811,8 @@ private struct NothingEarAdvancedPanel: View {
     }
 
     private func hydrateLEDColors() {
-        guard !deviceManager.state.caseLEDColors.isEmpty else { return }
-        caseLEDColors = deviceManager.state.caseLEDColors.map {
+        guard !state.caseLEDColors.isEmpty else { return }
+        caseLEDColors = state.caseLEDColors.map {
             Color(red: Double($0.red) / 255, green: Double($0.green) / 255, blue: Double($0.blue) / 255)
         }
         while caseLEDColors.count < 5 { caseLEDColors.append(.white) }
@@ -779,95 +834,11 @@ private struct NothingEarAdvancedPanel: View {
         default: "—"
         }
     }
-}
 
-private struct EarPopoverContainer<Content: View>: View {
-    let title: String
-    let subtitle: String
-    @ViewBuilder let content: () -> Content
-
-    init(title: String, subtitle: String, @ViewBuilder content: @escaping () -> Content) {
-        self.title = title
-        self.subtitle = subtitle
-        self.content = content
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 11) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title.uppercased())
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .tracking(1.1)
-                    .foregroundStyle(.white.opacity(0.88))
-                Text(subtitle)
-                    .font(.system(size: 9, weight: .medium, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.42))
-                    .lineLimit(1)
-            }
-
-            ScrollView {
-                content()
-            }
-            .scrollIndicators(.never)
+    private func openSettings() {
+        onDismiss()
+        DispatchQueue.main.async {
+            SettingsWindowController.shared.showWindow()
         }
-        .padding(14)
-        .frame(width: 330, height: 350, alignment: .topLeading)
-        .background(Color.black)
-        .preferredColorScheme(.dark)
-    }
-}
-
-private struct EarPanelToggle: View {
-    let title: String
-    let symbol: String
-    let isOn: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: symbol)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(isOn ? Color.effectiveAccent : .white.opacity(0.55))
-                    .frame(width: 18)
-                Text(title)
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.80))
-                Spacer()
-                Circle()
-                    .fill(isOn ? Color.effectiveAccent : Color.white.opacity(0.14))
-                    .frame(width: 16, height: 16)
-                    .overlay {
-                        if isOn {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 8, weight: .bold))
-                                .foregroundStyle(.white)
-                        }
-                    }
-            }
-            .padding(.horizontal, 10)
-            .frame(height: 31)
-            .background(
-                isOn ? Color.effectiveAccent.opacity(0.15) : Color.white.opacity(0.055),
-                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-            )
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-private struct EarSmallAction: View {
-    let title: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(title, action: action)
-            .buttonStyle(.plain)
-            .font(.system(size: 9, weight: .bold, design: .rounded))
-            .foregroundStyle(.white.opacity(0.72))
-            .padding(.horizontal, 8)
-            .frame(height: 24)
-            .background(Color.white.opacity(0.07), in: Capsule())
-            .overlay(Capsule().stroke(Color.white.opacity(0.11), lineWidth: 0.7))
     }
 }

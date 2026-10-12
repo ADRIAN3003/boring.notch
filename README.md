@@ -150,6 +150,24 @@ brew install --cask TheBoredTeam/boring-notch/boring-notch
 3. **Build and Run**:
     - Click the "Run" button or press `Cmd + R`. Watch the magic unfold!
 
+### Building from the Command Line
+
+To build a standalone app without opening Xcode:
+
+```bash
+xcodebuild -project boringNotch.xcodeproj -scheme boringNotch -configuration Release \
+  -derivedDataPath build/DerivedData ENABLE_HARDENED_RUNTIME=NO build
+
+open build/DerivedData/Build/Products/Release/boringNotch.app
+```
+
+The app ends up in `build/DerivedData/Build/Products/Release/boringNotch.app`, and `build/` is ignored by git.
+
+> [!NOTE]
+> The project has no development team configured, so a local build is only ad-hoc signed. With the hardened runtime on, macOS's library validation then refuses to load the bundled frameworks (`MediaRemoteAdapter`, `Sparkle`, `Lottie`), and the app quits the moment it opens. You'll see a crash report saying `Library not loaded ... not valid for use in process`. Passing `ENABLE_HARDENED_RUNTIME=NO` avoids this for local builds without changing the project. If you'd rather keep the hardened runtime on, choose your team under **Signing & Capabilities** in Xcode instead.
+
+An ad-hoc signed build is fine for running on your own Mac, but it isn't notarized, so don't share it. Because each build is signed differently, macOS may ask again for permissions such as Accessibility, Calendar or Bluetooth.
+
 ## 🤝 Contributing
 
 We’re all about good vibes and awesome contributions! Read [CONTRIBUTING.md](CONTRIBUTING.md) to learn how you can join the fun!
