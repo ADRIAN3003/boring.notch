@@ -461,7 +461,10 @@ struct NotchHomeView: View {
                     .animation(.interactiveSpring(response: 0.32, dampingFraction: 0.76, blendDuration: 0), value: shouldShowCamera)
             }
         }
-        .transition(.asymmetric(insertion: .opacity.combined(with: .move(edge: .top)), removal: .opacity))
+        // No transition here: the opacity transition on `body` must be the one
+        // used. An inner transition takes precedence, and the old
+        // `.move(edge: .top)` made Home slide in on tab switches while the
+        // other tabs faded.
         .blur(radius: vm.notchState == .closed ? 30 : 0)
     }
 }
