@@ -220,8 +220,13 @@ enum NothingProtocol {
         case NothingCommand.readEqualizer.rawValue,
              NothingCommand.equalizerResponse.rawValue,
              NothingCommand.equalizerListeningResponse.rawValue:
-            guard let value = frame.payload.first else { return nil }
-            return .equalizer(equalizer(for: value))
+            // The preset is the second byte when the earbuds send two, which
+            // is the usual case; a single-byte payload carries it directly.
+            let payload = frame.payload
+            guard !payload.isEmpty,
+                  let preset = equalizer(for: payload.count > 1 ? payload[1] : payload[0])
+            else { return nil }
+            return .equalizer(preset)
         case NothingCommand.readFirmware.rawValue,
              NothingCommand.firmwareResponse.rawValue:
             return .firmware(String(bytes: frame.payload, encoding: .utf8)?.trimmingCharacters(in: .controlCharacters) ?? "")
@@ -284,13 +289,18 @@ enum NothingProtocol {
         ]
     }
 
-    static func equalizer(for rawValue: UInt8) -> EqualizerPreset {
+    /// Preset bytes as used by Nothing X and swift-nothing-ear (NothingBar).
+    /// 0x04 is unused; 0x06 / 0x07 are "New Voice" / "New Instrument" on newer
+    /// models, which this app doesn't expose, so they're ignored rather than
+    /// shown as Custom.
+    static func equalizer(for rawValue: UInt8) -> EqualizerPreset? {
         switch rawValue {
-        case 0: .balanced
-        case 1: .moreBass
-        case 2: .moreTreble
-        case 3: .voice
-        default: .custom
+        case 0x00: .balanced
+        case 0x01: .voice
+        case 0x02: .moreTreble
+        case 0x03: .moreBass
+        case 0x05: .custom
+        default: nil
         }
     }
 
@@ -352,11 +362,11 @@ enum NothingProtocol {
 
     static func commandForEqualizer(_ preset: EqualizerPreset, codec: inout NothingFrameCodec) throws -> Data {
         let value: UInt8 = switch preset {
-        case .balanced: 0
-        case .moreBass: 1
-        case .moreTreble: 2
-        case .voice: 3
-        case .custom: 4
+        case .balanced: 0x00
+        case .voice: 0x01
+        case .moreTreble: 0x02
+        case .moreBass: 0x03
+        case .custom: 0x05
         }
         return try codec.makeFrame(command: .setEqualizer, payload: [value, 0x00])
     }

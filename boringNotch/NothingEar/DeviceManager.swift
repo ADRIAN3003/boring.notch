@@ -190,8 +190,12 @@ final class DeviceManager: ObservableObject {
     func setCustomEQ(_ levels: [Double]) {
         guard state.isConnected, state.capabilities.supportsCustomEQ else { return }
         state.customEQ = Array(levels.prefix(3))
-        state.equalizer = .custom
         send { try NothingProtocol.commandForCustomEQ(levels, codec: &self.protocolCodec) }
+        // Moving a custom band only changes the stored levels; switch the
+        // earbuds to the Custom preset too so what you hear matches the UI.
+        if state.equalizer != .custom {
+            setEqualizer(.custom)
+        }
     }
 
     func setCaseLEDColors(_ colors: [RGBColor]) {
@@ -504,8 +508,10 @@ final class DeviceManager: ObservableObject {
         case let .equalizer(preset):
             state.equalizer = preset
         case let .customEQ(levels):
+            // These are the stored custom band levels, which the earbuds
+            // report whatever preset is active. They don't mean Custom is
+            // selected; the equalizer response says which preset is.
             state.customEQ = levels
-            state.equalizer = .custom
         case let .firmware(version):
             if var descriptor = state.descriptor {
                 descriptor.firmware = version
