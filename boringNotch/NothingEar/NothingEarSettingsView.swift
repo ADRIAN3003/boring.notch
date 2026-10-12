@@ -6,6 +6,8 @@ import SwiftUI
 struct NothingEarSettingsView: View {
     @ObservedObject private var deviceManager = DeviceManager.shared
     @State private var caseLEDColors: [Color] = Array(repeating: .white, count: 5)
+    @Default(.showEarbudsBatteryInClosedNotch) private var showEarbudsBatteryInClosedNotch
+    @Default(.earbudsBatteryStyle) private var earbudsBatteryStyle
 
     var body: some View {
         Form {
@@ -281,6 +283,12 @@ struct NothingEarSettingsView: View {
                 Text("Show earbuds battery in closed notch")
                 Text("Replaces the music visualizer while a song is playing and your earbuds are connected.")
             }
+            Picker("Style", selection: $earbudsBatteryStyle) {
+                ForEach(EarbudsBatteryStyle.allCases) { style in
+                    Text(style.title).tag(style)
+                }
+            }
+            .disabled(!showEarbudsBatteryInClosedNotch)
         } header: {
             Text("Closed notch")
         }

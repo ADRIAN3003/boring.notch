@@ -838,7 +838,7 @@ private struct NothingEarMorePanel: View {
     private func openSettings() {
         onDismiss()
         DispatchQueue.main.async {
-            SettingsWindowController.shared.showWindow()
+            SettingsWindowController.shared.showWindow(tab: "Nothing Ear")
         }
     }
 }

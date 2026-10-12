@@ -40,6 +40,8 @@ struct ContentView: View {
 
     @Default(.showEarbudsBatteryInClosedNotch) var showEarbudsBatteryInClosedNotch
 
+    @Default(.earbudsBatteryStyle) var earbudsBatteryStyle
+
     // Shared interactive spring for movement/resizing to avoid conflicting animations
     private let animationSpring = Animation.interactiveSpring(response: 0.38, dampingFraction: 0.8, blendDuration: 0)
 
@@ -101,7 +103,14 @@ struct ContentView: View {
     /// centred on the physical notch.
     private var musicActivitySideWidth: CGFloat {
         let square = max(0, vm.effectiveClosedNotchHeight - 12)
-        return earbudsBatteryLevel == nil ? square : max(square, 46)
+        guard earbudsBatteryLevel != nil else { return square }
+        return switch earbudsBatteryStyle {
+        case .iconAndPercentage: max(square, 46)
+        case .percentage: max(square, 34)
+        // The rings are drawn to the visualizer's square, so the notch keeps
+        // its usual width.
+        case .ring, .ringWithPercentage: square
+        }
     }
 
     var body: some View {
@@ -535,32 +544,89 @@ struct ContentView: View {
 
     @ViewBuilder
     func EarbudsBatteryIndicator(level: Int) -> some View {
-        let label = HStack(spacing: 3) {
-            Image(systemName: "airpodspro")
-                .imageScale(.small)
-            Text("\(level)%")
-                .monospacedDigit()
-                .contentTransition(.numericText(value: Double(level)))
-                .animation(.smooth, value: level)
-        }
-        .font(.subheadline)
-        .fontWeight(.medium)
-        .lineLimit(1)
-        .fixedSize()
+        let side = max(0, vm.effectiveClosedNotchHeight - 12)
+        let showsRing = earbudsBatteryStyle == .ring || earbudsBatteryStyle == .ringWithPercentage
 
-        if level <= 20 {
-            label.foregroundStyle(.red)
-        } else {
-            // Painted exactly like the visualizer it replaces: a gradient of
-            // the album colour masked by the content, so both read the same.
-            Rectangle()
-                .fill(
-                    Defaults[.coloredSpectrogram]
-                        ? Color(nsColor: musicManager.avgColor).gradient
-                        : Color.gray.gradient
-                )
-                .mask(alignment: .trailing) { label }
+        ZStack(alignment: .trailing) {
+            if showsRing {
+                // Unfilled part of the ring, in the same gray as the app's
+                // other progress tracks.
+                Circle()
+                    .stroke(Color.gray.opacity(0.3), lineWidth: 2)
+                    .frame(width: max(0, side - 2), height: max(0, side - 2))
+                    .padding(1)
+            }
+
+            if level <= 20 {
+                EarbudsBatteryContent(level: level, side: side)
+                    .foregroundStyle(.red)
+            } else {
+                // Painted exactly like the visualizer it replaces: a gradient of
+                // the album colour masked by the content, so both read the same.
+                Rectangle()
+                    .fill(
+                        Defaults[.coloredSpectrogram]
+                            ? Color(nsColor: musicManager.avgColor).gradient
+                            : Color.gray.gradient
+                    )
+                    .mask(alignment: .trailing) {
+                        EarbudsBatteryContent(level: level, side: side)
+                    }
+            }
         }
+        .animation(.smooth, value: earbudsBatteryStyle)
+    }
+
+    @ViewBuilder
+    func EarbudsBatteryContent(level: Int, side: CGFloat) -> some View {
+        switch earbudsBatteryStyle {
+        case .iconAndPercentage:
+            HStack(spacing: 3) {
+                Image(systemName: "airpodspro")
+                    .imageScale(.small)
+                EarbudsBatteryText("\(level)%", level: level)
+            }
+            .font(.subheadline)
+            .fontWeight(.medium)
+            .lineLimit(1)
+            .fixedSize()
+        case .percentage:
+            EarbudsBatteryText("\(level)%", level: level)
+                .font(.subheadline)
+                .fontWeight(.medium)
+                .lineLimit(1)
+                .fixedSize()
+        case .ring:
+            EarbudsBatteryRing(level: level, side: side)
+        case .ringWithPercentage:
+            ZStack {
+                EarbudsBatteryRing(level: level, side: side)
+                // "100" has to fit inside the ring, so this scales with the
+                // notch instead of using a text style.
+                EarbudsBatteryText("\(level)", level: level)
+                    .font(.system(size: max(6, side * 0.38), weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .frame(width: max(0, side - 5))
+            }
+        }
+    }
+
+    func EarbudsBatteryText(_ text: String, level: Int) -> some View {
+        Text(text)
+            .monospacedDigit()
+            .contentTransition(.numericText(value: Double(level)))
+            .animation(.smooth, value: level)
+    }
+
+    func EarbudsBatteryRing(level: Int, side: CGFloat) -> some View {
+        Circle()
+            .trim(from: 0, to: CGFloat(level) / 100)
+            .stroke(style: StrokeStyle(lineWidth: 2, lineCap: .round))
+            .rotationEffect(.degrees(-90))
+            .frame(width: max(0, side - 2), height: max(0, side - 2))
+            .padding(1)
+            .animation(.smooth, value: level)
     }
 
     @ViewBuilder

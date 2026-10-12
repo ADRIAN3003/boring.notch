@@ -66,7 +66,13 @@ class SettingsWindowController: NSWindowController {
         window.delegate = self
     }
     
-    func showWindow() {
+    /// Shows the settings window, optionally switching to a page first. `tab`
+    /// is the page's sidebar title, e.g. "Nothing Ear".
+    func showWindow(tab: String? = nil) {
+        if let tab {
+            SettingsNavigation.shared.selectedTab = tab
+        }
+
         // Set app to regular mode first
         NSApp.setActivationPolicy(.regular)
         

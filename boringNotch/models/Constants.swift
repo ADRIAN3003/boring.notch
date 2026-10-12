@@ -59,6 +59,25 @@ enum SneakPeekStyle: String, CaseIterable, Identifiable, Defaults.Serializable {
     var id: String { self.rawValue }
 }
 
+// How the earbuds battery is drawn on the right of the closed music activity
+enum EarbudsBatteryStyle: String, CaseIterable, Identifiable, Defaults.Serializable {
+    case iconAndPercentage
+    case ringWithPercentage
+    case percentage
+    case ring
+
+    var id: String { self.rawValue }
+
+    var title: String {
+        switch self {
+        case .iconAndPercentage: "Icon and percentage"
+        case .ringWithPercentage: "Ring with percentage"
+        case .percentage: "Percentage only"
+        case .ring: "Ring only"
+        }
+    }
+}
+
 // Action to perform when Option (⌥) is held while pressing media keys
 enum OptionKeyAction: String, CaseIterable, Identifiable, Defaults.Serializable {
     case openSettings = "Open System Settings"
@@ -182,6 +201,7 @@ extension Defaults.Keys {
     
     // MARK: Nothing Ear
     static let showEarbudsBatteryInClosedNotch = Key<Bool>("showEarbudsBatteryInClosedNotch", default: true)
+    static let earbudsBatteryStyle = Key<EarbudsBatteryStyle>("earbudsBatteryStyle", default: .iconAndPercentage)
 
     // MARK: Media Controller
     static let mediaController = Key<MediaControllerType>("mediaController", default: defaultMediaController)

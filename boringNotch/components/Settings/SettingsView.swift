@@ -14,8 +14,16 @@ import Sparkle
 import SwiftUI
 import SwiftUIIntrospect
 
+/// Which settings page is showing. Shared so other parts of the app can open
+/// the settings window on a specific page.
+@MainActor
+final class SettingsNavigation: ObservableObject {
+    static let shared = SettingsNavigation()
+    @Published var selectedTab = "General"
+}
+
 struct SettingsView: View {
-    @State private var selectedTab = "General"
+    @ObservedObject private var navigation = SettingsNavigation.shared
     @State private var accentColorUpdateTrigger = UUID()
 
     let updaterController: SPUStandardUpdaterController?
@@ -26,7 +34,7 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $selectedTab) {
+            List(selection: $navigation.selectedTab) {
                 NavigationLink(value: "General") {
                     Label("General", systemImage: "gear")
                 }
@@ -73,7 +81,7 @@ struct SettingsView: View {
             .navigationSplitViewColumnWidth(200)
         } detail: {
             Group {
-                switch selectedTab {
+                switch navigation.selectedTab {
                 case "General":
                     GeneralSettings()
                 case "Appearance":
