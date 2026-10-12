@@ -1,4 +1,5 @@
 import AppKit
+import Defaults
 import SwiftUI
 
 @MainActor
@@ -17,6 +18,7 @@ struct NothingEarSettingsView: View {
             } else {
                 pairingSection
             }
+            notchSection
             privacySection
         }
         .formStyle(.grouped)
@@ -271,6 +273,18 @@ struct NothingEarSettingsView: View {
                 }
             }
         }
+    }
+
+    private var notchSection: some View {
+        Section {
+            Defaults.Toggle(key: .showEarbudsBatteryInClosedNotch) {
+                Text("Show earbuds battery in closed notch")
+                Text("Replaces the music visualizer while a song is playing and your earbuds are connected.")
+            }
+        } header: {
+            Text("Closed notch")
+        }
+        .tint(.effectiveAccent)
     }
 
     private var privacySection: some View {

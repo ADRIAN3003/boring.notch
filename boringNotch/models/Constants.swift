@@ -180,6 +180,9 @@ extension Defaults.Keys {
     // MARK: Fullscreen Media Detection
     static let hideNotchOption = Key<HideNotchOption>("hideNotchOption", default: .nowPlayingOnly)
     
+    // MARK: Nothing Ear
+    static let showEarbudsBatteryInClosedNotch = Key<Bool>("showEarbudsBatteryInClosedNotch", default: true)
+
     // MARK: Media Controller
     static let mediaController = Key<MediaControllerType>("mediaController", default: defaultMediaController)
     

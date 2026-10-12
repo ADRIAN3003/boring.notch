@@ -38,6 +38,8 @@ struct ContentView: View {
 
     @Default(.showNotHumanFace) var showNotHumanFace
 
+    @Default(.showEarbudsBatteryInClosedNotch) var showEarbudsBatteryInClosedNotch
+
     // Shared interactive spring for movement/resizing to avoid conflicting animations
     private let animationSpring = Animation.interactiveSpring(response: 0.38, dampingFraction: 0.8, blendDuration: 0)
 
@@ -82,11 +84,16 @@ struct ContentView: View {
     }
 
     /// Battery of the connected Nothing earbuds, shown in place of the music
-    /// visualizer. Uses the lower bud, since that's the one that runs out first.
+    /// visualizer. Averages both buds when both report a level, otherwise
+    /// shows whichever one does. Rounded to the nearest 5% so the closed notch
+    /// doesn't tick on every percent.
     private var earbudsBatteryLevel: Int? {
         let state = nothingEarManager.state
-        guard state.isConnected else { return nil }
-        return [state.leftBattery.level, state.rightBattery.level].compactMap { $0 }.min()
+        guard showEarbudsBatteryInClosedNotch, state.isConnected else { return nil }
+        let levels = [state.leftBattery.level, state.rightBattery.level].compactMap { $0 }
+        guard !levels.isEmpty else { return nil }
+        let average = Double(levels.reduce(0, +)) / Double(levels.count)
+        return Int((average / 5).rounded()) * 5
     }
 
     /// Width of each side of the music live activity. Both sides grow by the
@@ -94,7 +101,7 @@ struct ContentView: View {
     /// centred on the physical notch.
     private var musicActivitySideWidth: CGFloat {
         let square = max(0, vm.effectiveClosedNotchHeight - 12)
-        return earbudsBatteryLevel == nil ? square : max(square, 42)
+        return earbudsBatteryLevel == nil ? square : max(square, 46)
     }
 
     var body: some View {
@@ -528,17 +535,11 @@ struct ContentView: View {
 
     @ViewBuilder
     func EarbudsBatteryIndicator(level: Int) -> some View {
-        // Same colour source as the visualizer it replaces.
-        let tint = Defaults[.coloredSpectrogram] ? Color(nsColor: musicManager.avgColor) : Color.gray
-
-        HStack(spacing: 3) {
+        let label = HStack(spacing: 3) {
             Image(systemName: "airpodspro")
                 .imageScale(.small)
-                .foregroundStyle(tint.opacity(0.75))
             Text("\(level)%")
                 .monospacedDigit()
-                .foregroundStyle(level <= 20 ? Color.red : tint)
-                .animation(.smooth, value: musicManager.avgColor)
                 .contentTransition(.numericText(value: Double(level)))
                 .animation(.smooth, value: level)
         }
@@ -546,6 +547,20 @@ struct ContentView: View {
         .fontWeight(.medium)
         .lineLimit(1)
         .fixedSize()
+
+        if level <= 20 {
+            label.foregroundStyle(.red)
+        } else {
+            // Painted exactly like the visualizer it replaces: a gradient of
+            // the album colour masked by the content, so both read the same.
+            Rectangle()
+                .fill(
+                    Defaults[.coloredSpectrogram]
+                        ? Color(nsColor: musicManager.avgColor).gradient
+                        : Color.gray.gradient
+                )
+                .mask(alignment: .trailing) { label }
+        }
     }
 
     @ViewBuilder
