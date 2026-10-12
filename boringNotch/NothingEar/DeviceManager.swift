@@ -47,6 +47,12 @@ final class DeviceManager: ObservableObject {
     private var isStarted = false
     private var isUserDisconnect = false
     private var retryAttempt = 0
+    /// Only one connection attempt runs at a time. Discovery, polling, wake
+    /// and the retry timer can all ask to reconnect, and overlapping attempts
+    /// cancel each other in the transport.
+    private var isConnectionInFlight = false
+    /// Identifies the latest attempt so a superseded one can't overwrite state.
+    private var connectionAttemptID = 0
 
     init(
         transport: BluetoothTransport? = nil,
@@ -88,6 +94,7 @@ final class DeviceManager: ObservableObject {
         pollingTask = nil
         retryTask = nil
         transport.disconnect()
+        invalidateConnectionAttempt()
         isStarted = false
         isUserDisconnect = true
         retryAttempt = 0
@@ -108,16 +115,8 @@ final class DeviceManager: ObservableObject {
         retryAttempt = 0
         repository.remember(device)
         setConnectingState(for: device)
-
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            do {
-                try await transport.connect(to: device)
-                finishConnection(using: device)
-            } catch {
-                failConnection(error, device: device)
-            }
-        }
+        // A connection you pick yourself replaces any automatic attempt.
+        startConnectionAttempt(to: device)
     }
 
     func disconnect() {
@@ -133,6 +132,7 @@ final class DeviceManager: ObservableObject {
             ))
         }
         transport.disconnect()
+        invalidateConnectionAttempt()
         state.connection = .disconnected
         state.leftBattery = .unavailable
         state.rightBattery = .unavailable
@@ -345,7 +345,8 @@ final class DeviceManager: ObservableObject {
     }
 
     private func autoReconnectKnownDevice() {
-        guard !isUserDisconnect, state.connection != .connected, state.connection != .connecting else { return }
+        guard !isUserDisconnect, !isConnectionInFlight,
+              state.connection != .connected, state.connection != .connecting else { return }
         guard let candidate = repository.knownDevices.first(where: { automaticTarget(for: $0) != nil }) else { return }
         guard let target = automaticTarget(for: candidate) else { return }
         connectAutomatically(to: target)
@@ -353,6 +354,7 @@ final class DeviceManager: ObservableObject {
 
     private func connectToDiscoveredKnownDeviceIfNeeded() {
         guard !isUserDisconnect,
+              !isConnectionInFlight,
               state.connection != .connected,
               state.connection != .connecting,
               let match = repository.knownDevices.compactMap({ candidate in
@@ -372,18 +374,38 @@ final class DeviceManager: ObservableObject {
     }
 
     private func connectAutomatically(to device: BluetoothDeviceRecord) {
+        guard !isConnectionInFlight else { return }
         isUserDisconnect = false
         repository.remember(device)
         setConnectingState(for: device)
+        startConnectionAttempt(to: device)
+    }
+
+    private func startConnectionAttempt(to device: BluetoothDeviceRecord) {
+        connectionAttemptID += 1
+        let attemptID = connectionAttemptID
+        isConnectionInFlight = true
+
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
                 try await transport.connect(to: device)
+                guard attemptID == connectionAttemptID else { return }
+                isConnectionInFlight = false
                 finishConnection(using: device)
             } catch {
+                // A newer attempt (or a disconnect) replaced this one; its
+                // error is just the cancellation and must not start a retry.
+                guard attemptID == connectionAttemptID else { return }
+                isConnectionInFlight = false
                 failConnection(error, device: device)
             }
         }
+    }
+
+    private func invalidateConnectionAttempt() {
+        connectionAttemptID += 1
+        isConnectionInFlight = false
     }
 
     private func setConnectingState(for device: BluetoothDeviceRecord) {
@@ -460,7 +482,9 @@ final class DeviceManager: ObservableObject {
                 finishConnection(using: current)
             }
         case let .disconnected(reason):
-            guard !isUserDisconnect else { return }
+            // While an attempt is running it reports its own failure, so a
+            // disconnect here would only queue a second, competing retry.
+            guard !isUserDisconnect, !isConnectionInFlight else { return }
             state.connection = .reconnecting
             state.lastUpdated = .now
             publishEvent(.init(kind: .disconnected, title: "Device disconnected", detail: reason))

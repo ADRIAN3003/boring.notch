@@ -33,6 +33,12 @@ final class CoreBluetoothNothingTransport: NSObject, BluetoothTransport, @precon
     private var connectionTimeoutTask: Task<Void, Never>?
     private var candidateServiceCount = 0
     private var isDisconnecting = false
+    /// Peripherals whose connection we cancelled ourselves. CoreBluetooth
+    /// reports those cancellations later through `didDisconnectPeripheral`,
+    /// and by then a new attempt may be using the same peripheral. Without
+    /// this, the stale callback looked like the new attempt dropping, which
+    /// failed it and started another retry, endlessly.
+    private var cancelledPeripherals: Set<UUID> = []
 
     private(set) var currentDevice: BluetoothDeviceRecord?
 
@@ -62,7 +68,9 @@ final class CoreBluetoothNothingTransport: NSObject, BluetoothTransport, @precon
     }
 
     func connect(to device: BluetoothDeviceRecord) async throws {
-        disconnect()
+        // Clear any previous link without reporting it as a disconnect:
+        // that event would make DeviceManager schedule yet another retry.
+        tearDownConnection(notify: false)
         isDisconnecting = false
 
         guard centralManager.state == .poweredOn else {
@@ -84,15 +92,19 @@ final class CoreBluetoothNothingTransport: NSObject, BluetoothTransport, @precon
                 self.failPendingConnection(with: .connectionTimeout)
             }
 
-            if peripheral.state == .connected {
-                beginServiceDiscovery(for: peripheral)
-            } else {
-                centralManager.connect(peripheral, options: nil)
-            }
+            // Always go through connect, even when macOS already has the
+            // earbuds connected: our app's own link may have just been
+            // cancelled, and connect returns straight away when the system
+            // link is up.
+            centralManager.connect(peripheral, options: nil)
         }
     }
 
     func disconnect() {
+        tearDownConnection(notify: true)
+    }
+
+    private func tearDownConnection(notify: Bool) {
         isDisconnecting = true
         connectionTimeoutTask?.cancel()
         connectionTimeoutTask = nil
@@ -101,18 +113,27 @@ final class CoreBluetoothNothingTransport: NSObject, BluetoothTransport, @precon
         connectionContinuation = nil
 
         if let peripheral = connectedPeripheral {
-            centralManager.cancelPeripheralConnection(peripheral)
+            cancelConnection(to: peripheral)
         }
         connectedPeripheral = nil
         writeCharacteristic = nil
         notifyCharacteristic = nil
         candidateServiceCount = 0
 
-        if currentDevice != nil {
+        if notify && currentDevice != nil {
             eventContinuation.yield(.disconnected(reason: "Closed by application"))
         }
         currentDevice = nil
         pendingDevice = nil
+    }
+
+    private func cancelConnection(to peripheral: CBPeripheral) {
+        // A peripheral that's already disconnected gets no callback, so only
+        // expect one for links that are up or still being set up.
+        if peripheral.state != .disconnected {
+            cancelledPeripherals.insert(peripheral.identifier)
+        }
+        centralManager.cancelPeripheralConnection(peripheral)
     }
 
     func write(_ data: Data) throws {
@@ -231,7 +252,7 @@ final class CoreBluetoothNothingTransport: NSObject, BluetoothTransport, @precon
         let continuation = connectionContinuation
         connectionContinuation = nil
         if let peripheral = connectedPeripheral {
-            centralManager.cancelPeripheralConnection(peripheral)
+            cancelConnection(to: peripheral)
         }
         connectedPeripheral = nil
         writeCharacteristic = nil
@@ -296,6 +317,9 @@ final class CoreBluetoothNothingTransport: NSObject, BluetoothTransport, @precon
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        // CoreBluetooth reports a cancellation before a later connect, so any
+        // marker still here is stale and would hide the next real drop.
+        cancelledPeripherals.remove(peripheral.identifier)
         isScanning = false
         central.stopScan()
         connectedPeripheral = peripheral
@@ -308,6 +332,8 @@ final class CoreBluetoothNothingTransport: NSObject, BluetoothTransport, @precon
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        // The callback for a cancellation we asked for, not a real drop.
+        if cancelledPeripherals.remove(peripheral.identifier) != nil { return }
         guard connectedPeripheral?.identifier == peripheral.identifier else { return }
         let wasApplicationDisconnect = isDisconnecting
         connectedPeripheral = nil
@@ -324,6 +350,10 @@ final class CoreBluetoothNothingTransport: NSObject, BluetoothTransport, @precon
             eventContinuation.yield(.disconnected(reason: detail))
         }
         isDisconnecting = false
+
+        // Scanning stops when a connection is made. Start it again so the
+        // earbuds are found when they come back.
+        startScanIfNeeded()
     }
 
     // MARK: CBPeripheralDelegate
