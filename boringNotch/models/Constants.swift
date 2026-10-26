@@ -202,6 +202,8 @@ extension Defaults.Keys {
     // MARK: Nothing Ear
     static let showEarbudsBatteryInClosedNotch = Key<Bool>("showEarbudsBatteryInClosedNotch", default: true)
     static let earbudsBatteryStyle = Key<EarbudsBatteryStyle>("earbudsBatteryStyle", default: .iconAndPercentage)
+    // Chosen product colour per model, keyed by `NothingDeviceModel.key`
+    static let nothingDeviceColors = Key<[String: String]>("nothingDeviceColors", default: [:])
 
     // MARK: Media Controller
     static let mediaController = Key<MediaControllerType>("mediaController", default: defaultMediaController)

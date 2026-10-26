@@ -8,6 +8,7 @@ struct NothingEarSettingsView: View {
     @State private var caseLEDColors: [Color] = Array(repeating: .white, count: 5)
     @Default(.showEarbudsBatteryInClosedNotch) private var showEarbudsBatteryInClosedNotch
     @Default(.earbudsBatteryStyle) private var earbudsBatteryStyle
+    @Default(.nothingDeviceColors) private var nothingDeviceColors
 
     var body: some View {
         Form {
@@ -38,10 +39,13 @@ struct NothingEarSettingsView: View {
     private var connectionSection: some View {
         Section("Connection") {
             HStack(spacing: 10) {
-                Image(systemName: deviceManager.state.isConnected ? "airpodspro" : "waveform")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(deviceManager.state.isConnected ? Color.effectiveAccent : .secondary)
-                    .frame(width: 30)
+                NothingDeviceImage(
+                    name: deviceManager.state.isConnected ? deviceManager.state.descriptor?.name : nil,
+                    fallbackSymbol: deviceManager.state.isConnected ? "airpodspro" : "waveform"
+                )
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(deviceManager.state.isConnected ? Color.effectiveAccent : .secondary)
+                .frame(width: 44, height: 30)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(deviceManager.state.descriptor?.name ?? "No Nothing / CMF device connected")
                         .fontWeight(.semibold)
@@ -55,6 +59,18 @@ struct NothingEarSettingsView: View {
                     Button("Disconnect") { deviceManager.disconnect() }
                 } else {
                     Button("Refresh") { deviceManager.refreshDiscovery() }
+                }
+            }
+
+            if let model = NothingDeviceModel.resolve(name: deviceManager.state.descriptor?.name),
+               model.colours.count > 1 {
+                Picker("Colour", selection: Binding(
+                    get: { model.colour(chosen: nothingDeviceColors[model.key]) ?? "" },
+                    set: { nothingDeviceColors[model.key] = $0 }
+                )) {
+                    ForEach(model.colours, id: \.self) { colour in
+                        Text(verbatim: NothingDeviceModel.colourTitle(colour)).tag(colour)
+                    }
                 }
             }
 
@@ -87,8 +103,9 @@ struct NothingEarSettingsView: View {
 
     private func deviceRow(_ device: BluetoothDeviceRecord, discovered: Bool) -> some View {
         HStack(spacing: 9) {
-            Image(systemName: "airpodspro")
+            NothingDeviceImage(name: device.name)
                 .foregroundStyle(.secondary)
+                .frame(width: 34, height: 24)
             VStack(alignment: .leading, spacing: 2) {
                 Text(device.name)
                     .lineLimit(1)

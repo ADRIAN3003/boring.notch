@@ -19,7 +19,11 @@ struct NothingEarView: View {
 
     var body: some View {
         HStack(alignment: .top) {
-            EarDeviceArtwork(isConnected: state.isConnected)
+            EarDeviceArtwork(
+                isConnected: state.isConnected,
+                deviceName: state.descriptor?.name
+                    ?? deviceManager.repository.knownDevices.max(by: { $0.lastSeen < $1.lastSeen })?.name
+            )
                 .padding(.all, 5)
 
             Group {
@@ -258,6 +262,7 @@ struct NothingEarView: View {
 /// album-art lighting effect.
 private struct EarDeviceArtwork: View {
     let isConnected: Bool
+    let deviceName: String?
 
     private var cornerRadius: CGFloat {
         Defaults[.cornerRadiusScaling]
@@ -284,10 +289,12 @@ private struct EarDeviceArtwork: View {
                     )
                 )
                 .overlay {
-                    Image(systemName: "airpodspro")
+                    NothingDeviceImage(name: deviceName)
                         .font(.system(size: 46, weight: .light))
                         .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(isConnected ? Color.white : Color.gray)
+                        .padding(8)
+                        .opacity(isConnected ? 1 : 0.6)
                 }
         }
         .aspectRatio(1, contentMode: .fit)
@@ -411,9 +418,9 @@ private struct EarDiscoveredDeviceRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
-                Image(systemName: "airpodspro")
+                NothingDeviceImage(name: device.name)
                     .foregroundStyle(.gray)
-                    .frame(width: 18)
+                    .frame(width: 28, height: 22)
 
                 VStack(alignment: .leading, spacing: 0) {
                     Text(device.name)
